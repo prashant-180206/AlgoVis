@@ -31,6 +31,10 @@ export class CallExpression extends Expression {
   public constructor(location: SourceLocation, public readonly callee: Expression, public readonly argumentsList: readonly Expression[]) { super(location); }
 }
 
+export class IndexExpression extends Expression {
+  public constructor(location: SourceLocation, public readonly object: Expression, public readonly index: Expression) { super(location); }
+}
+
 export class AssignmentStatement extends Statement {
   public constructor(location: SourceLocation, public readonly target: IdentifierExpression, public readonly value: Expression) { super(location); }
 }
