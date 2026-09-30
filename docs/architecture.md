@@ -1,112 +1,237 @@
 # AlgoVis Architecture
 
-AlgoVis is a custom algorithm language. It does not execute Python and the Rust/Tauri layer is not the language runtime.
+AlgoVis is a small interpreted algorithm language with a separate runtime and visualization pipeline. It does not execute JavaScript, Python, or Rust. The syntax is JavaScript-like, but all execution is implemented by the TypeScript core.
 
 ```text
-source -> Lexer -> Parser -> AST -> Interpreter -> Runtime + ExecutionTrace -> UI / renderer
+source
+  -> Lexer
+  -> tokens
+  -> Parser
+  -> AST
+  -> Interpreter
+  -> Runtime + ExecutionTrace + RuntimeSnapshots
+  -> VisualizationProjector
+  -> VisualizationState
+  -> CanvasRenderer
 ```
 
 ## Boundaries
 
-- `src/core/language` owns source locations, tokens, the lexer, parser, and AST classes.
-- `src/core/runtime` owns scopes, runtime values, arrays, call frames, and snapshots.
-- `src/core/execution` owns the event vocabulary and event history.
-- `src/core/interpreter` owns evaluation and stepping. It may depend on language and runtime, but never on React, Canvas, or Tauri.
-- `src/core/visualization` converts runtime snapshots into renderer-safe objects and draws them with Canvas 2D.
-- `src/App.tsx` observes the core. It must not evaluate AST nodes or mutate runtime objects directly.
+- `src/core/language` owns source locations, tokens, lexical analysis, parsing, and AST nodes.
+- `src/core/interpreter` evaluates AST nodes, creates scopes, invokes functions and methods, and controls execution status.
+- `src/core/runtime` owns values, scopes, classes, call frames, event history, snapshots, and retained environments.
+- `src/core/execution` defines observable execution events and the event trace.
+- `src/core/visualization` converts runtime snapshots into renderer-safe state and draws that state with Canvas 2D.
+- `src/App.tsx` coordinates editing, execution history, snapshot selection, and canvas rendering. React does not evaluate AST nodes or mutate runtime values directly.
+- `src-tauri` provides the desktop shell. It is not part of the language runtime.
 
-## Adding a language feature
+The core is exported through `src/core/index.ts`, so application code can import the public language, runtime, interpreter, and visualization APIs from one module.
 
-1. Add token types and keyword mappings in `Token.ts` and `Lexer.ts`.
-2. Add an AST class in `Ast.ts` with a `SourceLocation`.
-3. Teach `Parser.ts` to construct the node. Keep syntax errors as `ParserError` with a location.
-4. Add evaluation in `Interpreter.ts` or extract a dedicated evaluator when the feature grows.
-5. Emit an `ExecutionEvent` for an observable operation. The payload should contain stable identifiers such as `structureId`, `index`, or `name`, not UI objects.
-6. Add a focused runtime smoke test before wiring a panel or renderer.
+## Current language
 
-A feature is incomplete until it has syntax, AST representation, runtime semantics, an observable event where appropriate, and a testable error path.
+The language uses JavaScript-like delimiters and control-flow syntax:
 
-## Typed language syntax
-
-The initial type syntax is declaration-first and intentionally small:
-
-```text
-Number xy = 23
-String s = "sample"
-Array<Number> arr = [2, 3, 4]
-Stack<Number> st
-Number len = arr.length()
-st.push(xy)
-```
-
-Type names are parsed as `TypeReference` nodes. Generic arguments are checked when a value is declared and are enforced again by mutating methods such as `Stack<Number>.push` and `ArrayPointer.set`. New classes can add their own generic rules through `RuntimeClassDefinition.isAssignable`.
-
-The lexer and AST already reserve control-flow tokens and block nodes. Loops should be added as the next language milestone, with explicit `ForStatement`/`WhileStatement` nodes and interpreter continuations so stepping remains deterministic.
-
-## Adding a runtime data structure
-
-Create a class in `src/core/runtime` rather than a React component. The class should own computational state and expose small operations:
-
-```ts
-export class StackValue {
-  public constructor(public readonly id: string, private readonly items: RuntimeValue[] = []) {}
-
-  public push(value: RuntimeValue): void { this.items.push(value); }
-  public pop(): RuntimeValue { /* validate empty state, then remove */ }
-  public snapshot(): readonly RuntimeValue[] { return [...this.items]; }
+```js
+class Stack {
+  constructor() { this.items = []; }
+  push(value) { this.items.push(value); }
+  pop() { return this.items.pop(); }
 }
+
+let stack = new Stack();
+stack.push(10);
+let top = stack.pop();
 ```
 
-Represent the value in the `RuntimeValue` union, install a language builtin that creates it, and emit events from operations such as `PUSH` and `POP`. A renderer should consume a serializable visualization projection later; it should not receive the class instance.
+The current syntax includes:
 
-Register the class methods through `RuntimeClassRegistry` rather than adding `instanceof` branches to the parser. A class definition provides a name, generic assignability rules, and a method map:
+- Literals: numbers, strings, booleans, `null`, and `undefined`.
+- Identifiers, `this`, arrays, and object literals.
+- `let`, `const`, and `var` declarations.
+- Assignments and compound assignments: `=`, `+=`, `-=`, `*=`, `/=`.
+- Arithmetic, comparison, equality, logical, unary, increment, and decrement operators.
+- Calls, member access, and index access.
+- Functions, returns, blocks, `if`/`else`, `while`, `for`, `break`, and `continue`.
+- Classes, constructors, methods, instances, `new`, and instance fields.
+- Semicolons as explicit statement separators and execution boundaries for top-level stepping.
+
+This is an intentionally small language, not a complete ECMAScript implementation. Unsupported JavaScript features should be added through the language pipeline rather than evaluated with `eval`.
+
+## Core modules
+
+### Language
+
+`src/core/language/SourceLocation.ts` defines `SourcePosition` and `SourceLocation`. Every token and AST node carries a source range so parser, interpreter, and UI errors can point back to the editor.
+
+`Token.ts` defines `TokenType` and immutable `Token` values. The token set includes keywords, literals, operators, delimiters, braces, brackets, dots, commas, colons, newlines, semicolons, and EOF.
+
+`Lexer.ts` converts source text into tokens. It handles whitespace, line comments, block comments, numbers, quoted strings with basic escapes, identifiers, keyword lookup, and longest-match operator recognition. Keyword lookup must use own-property checks so identifiers such as `constructor` and `toString` cannot accidentally resolve through `Object.prototype`.
+
+`Ast.ts` contains the syntax tree. Expressions include literals, identifiers, `this`, arrays, objects, unary/binary operators, calls, indexes, members, and `new`. Statements include declarations, expression and assignment statements, blocks, conditionals, loops, functions, classes, returns, break, and continue.
+
+`Parser.ts` is a recursive-descent parser. It consumes separators, builds statements, parses blocks, and uses precedence climbing for binary expressions. Postfix parsing handles chained calls, indexing, and member access. Parser failures are `ParserError` instances with a `SourceLocation`.
+
+### Interpreter
+
+`src/core/interpreter/Interpreter.ts` owns execution. It exposes:
+
+- `start()` to begin execution.
+- `step()` to execute one top-level statement boundary.
+- `run()` to execute until finished or failed.
+- `pause()` to request a paused status.
+- `reset()` to create a fresh runtime execution state.
+- `history` to expose immutable runtime snapshots captured during execution.
+
+Each step emits a `STATEMENT` event, executes the statement, updates status, and records a snapshot. A runtime error changes the interpreter to `FAILED` and emits an `ERROR` event.
+
+Blocks, loops, and function bodies may execute several internal AST statements during one outer step. The public step/history API is stable while finer-grained continuation stepping can be added later.
+
+The interpreter evaluates expressions against a `Scope`. Function calls create child scopes and call frames. Class methods can receive an instance receiver, which is exposed as `this`. Return, break, and continue use internal control-flow signals rather than JavaScript exceptions exposed to the user.
+
+Built-ins currently include `console`, `Number`, `String`, and `Array`. Array member behavior includes `length`, `push`, and `pop`.
+
+### Runtime values
+
+`src/core/runtime/Values.ts` defines the runtime value hierarchy:
+
+- `PrimitiveValue`: number, string, boolean, null, or undefined.
+- `ArrayValue`: mutable indexed storage with an object ID, active indices, bounds checks, and optional element type metadata.
+- `ObjectValue`: string-keyed mutable properties.
+- `InstanceValue`: object fields plus a class name and method table.
+- `ClassValue`: a constructor-like runtime value with methods and an instance factory.
+- `ArrayPointerValue`: a reference to one array element.
+- `FunctionValue`: callable runtime code or a built-in function.
+
+`displayValue()` provides readable values for the runtime inspector and visualization projection. Runtime objects remain TypeScript values inside the interpreter; the UI consumes snapshots and projections instead.
+
+### Scopes and environments
+
+`src/core/runtime/Scope.ts` implements lexical bindings:
+
+- `define()` creates a binding in the current scope.
+- `assign()` updates the nearest existing binding.
+- `defineOrAssign()` updates an existing binding or creates a new one.
+- `get()` resolves through parent scopes.
+- `entries()` returns variables owned by that scope.
+- Every scope has a stable environment ID and a parent reference.
+
+The runtime registers created scopes. This lets snapshots preserve globals, function environments, and block environments after a function returns. Retained environments support execution history and future timeline visualization.
+
+### Classes and runtime method registries
+
+`src/core/runtime/RuntimeClass.ts` provides `RuntimeClassRegistry` and `RuntimeClassDefinition`. A runtime class definition has:
+
+- A type name.
+- A method map receiving `(receiver, argumentsList, runtime)`.
+- Optional `isAssignable` logic for type compatibility.
+
+Use the registry for built-in computational structures. Do not add parser branches for `Queue`, `LinkedList`, or `Tree`; those are runtime concepts. A future structure can register a value type, methods, assignability rules, and events while the language keeps using normal member calls.
+
+User-written language classes are represented by `ClassValue` and `InstanceValue`. Their methods are parsed as `FunctionDeclaration` nodes and bound to `this` when accessed from an instance.
+
+### Runtime snapshots
+
+`src/core/runtime/Runtime.ts` is the inspection boundary. `RuntimeSnapshot` contains:
+
+- `stepIndex` and `currentLocation`.
+- `callStack` with active runtime frames.
+- `frames` with serializable frame variables.
+- `environments` with IDs, parent IDs, kind, active state, and variables.
+- `globals` as a convenient global-binding view.
+- `frameHistory` including returned frames and captured locals.
+- `events` containing the execution trace at that point.
+- `globalEnvironmentId` for graph roots.
+
+Runtime snapshots copy mutable arrays and object fields, so React history can safely retain them. New mutable runtime value types must be added to `Runtime.copyValue()` to keep historical snapshots isolated.
+
+### Events
+
+`src/core/execution/ExecutionEvent.ts` defines the event vocabulary:
+
+- `PROGRAM_STARTED`
+- `STATEMENT`
+- `READ`
+- `WRITE`
+- `COMPARE`
+- `CALL`
+- `METHOD`
+- `RETURN`
+- `ERROR`
+- `PROGRAM_FINISHED`
+
+Events contain an optional source location and a payload of stable data. Payloads should use names, indexes, IDs, operators, and counts instead of React or Canvas objects. Add a new event when an operation must be visible in an execution timeline or visual animation.
+
+`ExecutionTrace` records events and returns copies of the event list. It can be cleared during reset.
+
+## Visualization pipeline
+
+`src/core/visualization/VisualizationState.ts` contains the renderer-facing model.
+
+`VisualizationProjector.project(snapshot)` converts runtime snapshots into:
+
+- `VisualEnvironment` cards with variables and active state.
+- `VisualArray` objects with values and active indices.
+- `VisualInstance` objects with class names and fields.
+- `VisualObject` objects with generic properties.
+- `VisualStack` as a reserved discriminated type for future stack projection.
+
+The projector deduplicates referenced objects and recursively discovers nested arrays, instances, and objects. This keeps the renderer independent of `Runtime`, `Scope`, and AST classes.
+
+`CanvasRenderer.ts` draws the projected state. It currently:
+
+- Draws the environment graph as variable cards.
+- Draws arrays and reserved stack objects.
+- Draws generic object and class-instance field panels.
+- Supports custom class renderers through `registerClassRenderer()`.
+- Maintains a viewport offset with `panBy()` and `resetView()`.
+- Draws the world inside a translated canvas context, allowing layouts larger than the visible canvas.
+
+`VisualizationStage.tsx` connects pointer dragging and wheel movement to `CanvasRenderer.panBy()`. Its Fit button calls `resetView()`. The renderer does not decide algorithm intent; it only draws the projection it receives.
+
+## Adding a new data structure
+
+For a built-in computational structure:
+
+1. Add a runtime value class in `Values.ts` or a focused runtime file.
+2. Add it to the `RuntimeValue` union.
+3. Add copy logic in `Runtime.copyValue()`.
+4. Register assignability and methods in `RuntimeClassRegistry`.
+5. Add interpreter construction or builtin installation if the language needs a constructor.
+6. Emit structure-specific events such as `ENQUEUE`, `DEQUEUE`, `LINK`, or `ROTATE` if the UI needs them.
+7. Project the value into a discriminated visualization object.
+8. Register a specialized renderer with `CanvasRenderer.registerClassRenderer()` when generic fields are not enough.
+
+For a user-written class, no runtime registry change is required for basic construction. The parser creates a `ClassDeclaration`, the interpreter creates a `ClassValue`, `new` creates an `InstanceValue`, and member access binds methods to the instance.
+
+Example renderer extension:
 
 ```ts
-runtime.classes.register({
-  name: "Queue",
-  methods: new Map([
-    ["enqueue", (receiver, args, runtime) => {
-      // mutate the QueueValue, emit an event, and return a RuntimeValue
-    }],
-  ]),
+renderer.registerClassRenderer("Queue", (context, object, x, y, width, height) => {
+  // Draw queue-specific geometry using object.fields.
 });
 ```
 
-The interpreter resolves `object.method(...)` through this registry. That means a future `TreeValue` or user-defined structure can add methods without changing member-expression parsing. Keep type checking in the class definition's `isAssignable` function, and keep drawing in the visualization projection/renderer layer.
+Keep custom renderers focused on drawing. Queue or linked-list mutation belongs in the runtime/interpreter layer.
 
-## Adding a visualization
+## Adding a language feature
 
-Keep three concepts separate:
+1. Add a token or keyword in `Token.ts` and `Lexer.ts`.
+2. Add an AST node in `Ast.ts` with a source location.
+3. Teach `Parser.ts` how to construct the node and report `ParserError` locations.
+4. Add evaluation in `Interpreter.ts` and create or update scopes as needed.
+5. Emit events for observable operations.
+6. Ensure `Runtime.snapshot()` copies any new mutable value type.
+7. Extend `VisualizationState` only if the feature needs a visual projection.
+8. Add a runtime smoke test and run `npm run build`.
 
-1. Runtime value: mutable computational object such as `ArrayValue`.
-2. Execution event: what happened, such as `COMPARE`, `SWAP`, or `PUSH`.
-3. Visualization projection: serializable data needed by a renderer, such as values and active indices.
+Do not solve language behavior in the renderer or UI. Keep the dependency direction flowing from UI to core, not from core to React or Canvas.
 
-The Canvas renderer can map a projection to pixels, but it must never infer algorithm intent from values. If an index is being compared, the interpreter emits that fact.
+## Validation
 
-The current implementation uses `VisualizationProjector` to turn `RuntimeSnapshot.globals` into `VisualizationState`, then passes that state to `CanvasRenderer`. To add a new structure, add a discriminated object to `VisualizationState`, project the corresponding runtime value, and add a renderer method. Keep the renderer input serializable and independent of `Scope`, `ArrayValue`, and AST classes.
+The application build is:
 
-## Stepping and history
+```powershell
+npm run build
+```
 
-`Interpreter.step()` advances one statement execution for the current milestone. It returns a `RuntimeSnapshot` containing the current source location, globals, call stack, and trace. The next execution milestone can replace the statement cursor with an explicit continuation stack without changing the UI contract.
-
-When history is added, store immutable snapshots or event-plus-checkpoint pairs. Do not expose mutable `Scope` or `ArrayValue` instances to React state.
-
-## Runtime inspection
-
-`Runtime.snapshot()` is the inspection boundary for the UI. It contains:
-
-- `environments`: global, function, and block scopes with stable IDs and active/inactive status.
-- `globals`: global bindings with runtime type, declared type, object identity, and class name when available.
-- `frames`: currently active call frames with their local variables.
-- `frameHistory`: returned frames, including their captured environment variables, so recursive calls remain visible after they return.
-
-The runtime-state panel should consume these records rather than reading `Scope`, `CallFrame`, or interpreter fields directly. Active environments represent the current execution state; inactive environments are retained for future timeline/history features but should not be presented as live bindings.
-
-## Design rules
-
-- Keep runtime state explicit; avoid module-level mutable state.
-- Preserve deterministic execution for the same source and initial state.
-- Prefer discriminated event types and typed payloads over `any`.
-- Use source locations on every AST node and emitted event that corresponds to source code.
-- Add dependencies only when they solve a concrete problem at the current milestone.
+A useful manual smoke program should include declarations, arrays, object fields, a user-defined class, method calls, and a mutation. Run it in the editor, inspect the runtime-state panel, use Previous/Next step, and drag or wheel the visualization when the projected world is larger than the canvas.
