@@ -9,7 +9,6 @@ import {
   PrimitiveValue,
   RuntimeObject,
   RuntimeValue,
-  StackValue,
 } from "./Values";
 
 export type RuntimeMethod = (
@@ -131,15 +130,6 @@ export class RuntimeClassRegistry {
             registry.isAssignable(item, type.typeArguments[0]),
           )),
     });
-    this.register({
-      name: "Stack",
-      methods: new Map(),
-      isAssignable: (value, type, registry) =>
-        value instanceof StackValue &&
-        (type.typeArguments.length === 0 ||
-          value.values.every((item) =>
-            registry.isAssignable(item, type.typeArguments[0]),
-          )),
-    });
+
   }
 }

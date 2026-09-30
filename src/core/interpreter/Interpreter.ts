@@ -58,12 +58,16 @@ export class Interpreter {
   public status = InterpreterStatus.Ready;
   public lastError?: Error;
   public readonly runtime: Runtime;
+  public get history(): readonly RuntimeSnapshot[] {
+    return this.runtime.snapshots;
+  }
   public constructor(
     private readonly program: Program,
     runtime = new Runtime(),
   ) {
     this.runtime = runtime;
     this.installBuiltins();
+    this.runtime.captureSnapshot();
   }
   public start(): RuntimeSnapshot {
     this.status = InterpreterStatus.Running;
@@ -75,7 +79,7 @@ export class Interpreter {
       this.cursor >= this.program.statements.length
     ) {
       this.status = InterpreterStatus.Finished;
-      return this.runtime.snapshot();
+      return this.recordSnapshot();
     }
     const statement = this.program.statements[this.cursor];
     try {
@@ -105,7 +109,7 @@ export class Interpreter {
         payload: { message: this.lastError.message },
       });
     }
-    return this.runtime.snapshot();
+    return this.recordSnapshot();
   }
   public run(): RuntimeSnapshot {
     if (this.status === InterpreterStatus.Ready)
@@ -115,7 +119,7 @@ export class Interpreter {
       this.status === InterpreterStatus.Paused
     )
       this.step();
-    return this.runtime.snapshot();
+    return this.history[this.history.length - 1] ?? this.recordSnapshot();
   }
   public pause(): void {
     if (this.status === InterpreterStatus.Running)
@@ -125,12 +129,16 @@ export class Interpreter {
     this.cursor = 0;
     this.status = InterpreterStatus.Ready;
     this.lastError = undefined;
-    this.runtime.stepIndex = 0;
-    this.runtime.currentLocation = undefined;
-    this.runtime.trace.clear();
+    this.runtime.resetExecution();
+    this.installBuiltins();
+    this.runtime.captureSnapshot();
   }
   public get currentStatementIndex(): number {
     return this.cursor;
+  }
+
+  private recordSnapshot(): RuntimeSnapshot {
+    return this.history[this.history.length - 1] ?? this.runtime.captureSnapshot();
   }
 
   private execute(statement: Statement, scope: Scope): void {
@@ -258,20 +266,39 @@ export class Interpreter {
     declaration.parameters.forEach((parameter, index) =>
       locals.define(parameter, args[index] ?? new PrimitiveValue(undefined)),
     );
-    this.runtime.callStack.push({
+    this.runtime.enterFrame({
       functionName: declaration.name,
       locals,
       callLocation: declaration.location,
     });
+    this.runtime.emit({
+      type: ExecutionEventType.Call,
+      location: declaration.location,
+      payload: { name: declaration.name, environmentId: locals.id },
+    });
+    let result = new PrimitiveValue(undefined) as RuntimeValue;
+    let completed = false;
     try {
       this.execute(declaration.body, locals);
-      return new PrimitiveValue(undefined);
+      result = new PrimitiveValue(undefined);
+      completed = true;
     } catch (signal) {
-      if (signal instanceof ReturnSignal) return signal.value;
-      throw signal;
+      if (signal instanceof ReturnSignal) {
+        result = signal.value;
+        completed = true;
+      }
+      else throw signal;
     } finally {
-      this.runtime.callStack.pop();
+      this.runtime.leaveFrame();
+      if (completed) {
+        this.runtime.emit({
+          type: ExecutionEventType.Return,
+          location: declaration.location,
+          payload: { name: declaration.name, value: result },
+        });
+      }
     }
+    return result;
   }
   private invokeMethod(
     method: FunctionValue,
@@ -336,11 +363,6 @@ export class Interpreter {
       );
       if (!(callee instanceof FunctionValue))
         throw new Error("Only functions can be called.");
-      this.runtime.emit({
-        type: ExecutionEventType.Call,
-        location: expression.location,
-        payload: { name: callee.name, argumentCount: args.length },
-      });
       return callee.call(...args);
     }
     throw new Error(

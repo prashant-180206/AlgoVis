@@ -52,6 +52,11 @@ export class Scope {
   public entries(): readonly [string, RuntimeValue][] {
     return [...this.bindings.entries()];
   }
+
+  public clear(): void {
+    this.bindings.clear();
+    this.declaredTypes.clear();
+  }
   public get parentScope(): Scope | undefined {
     return this.parent;
   }

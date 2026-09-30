@@ -5,7 +5,7 @@ import {
   displayValue,
   PrimitiveValue,
   RuntimeValue,
-  StackValue,
+  // StackValue,
 } from "../runtime/Values";
 
 export interface VisualArray {
@@ -35,8 +35,6 @@ export class VisualizationProjector {
     snapshot.globals.forEach(({ name, value }) => {
       if (value instanceof ArrayValue)
         objects.push(this.projectArray(name, value));
-      if (value instanceof StackValue)
-        objects.push(this.projectStack(name, value));
     });
     const lastEvent = snapshot.events[snapshot.events.length - 1];
     return {
@@ -46,14 +44,6 @@ export class VisualizationProjector {
     };
   }
 
-  private projectStack(label: string, value: StackValue): VisualStack {
-    return {
-      type: "stack",
-      id: value.id,
-      label,
-      values: value.values.map((item) => this.display(item)),
-    };
-  }
 
   private projectArray(label: string, value: ArrayValue): VisualArray {
     return {

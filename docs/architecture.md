@@ -92,6 +92,17 @@ The current implementation uses `VisualizationProjector` to turn `RuntimeSnapsho
 
 When history is added, store immutable snapshots or event-plus-checkpoint pairs. Do not expose mutable `Scope` or `ArrayValue` instances to React state.
 
+## Runtime inspection
+
+`Runtime.snapshot()` is the inspection boundary for the UI. It contains:
+
+- `environments`: global, function, and block scopes with stable IDs and active/inactive status.
+- `globals`: global bindings with runtime type, declared type, object identity, and class name when available.
+- `frames`: currently active call frames with their local variables.
+- `frameHistory`: returned frames, including their captured environment variables, so recursive calls remain visible after they return.
+
+The runtime-state panel should consume these records rather than reading `Scope`, `CallFrame`, or interpreter fields directly. Active environments represent the current execution state; inactive environments are retained for future timeline/history features but should not be presented as live bindings.
+
 ## Design rules
 
 - Keep runtime state explicit; avoid module-level mutable state.

@@ -6,7 +6,6 @@ export type RuntimeValue =
   | PrimitiveValue
   | ArrayValue
   | ArrayPointerValue
-  | StackValue
   | ObjectValue
   | InstanceValue
   | ClassValue
@@ -140,40 +139,6 @@ export class ArrayPointerValue extends RuntimeObject {
   }
 }
 
-export class StackValue extends RuntimeObject {
-  public readonly runtimeType = "Stack";
-  public readonly id: string;
-  public readonly values: RuntimeValue[];
-  public elementType?: TypeReference;
-  public constructor(
-    id: string,
-    values: RuntimeValue[] = [],
-    elementType?: TypeReference,
-  ) {
-    super();
-    this.id = id;
-    this.values = values;
-    this.elementType = elementType;
-  }
-
-  public push(value: RuntimeValue): void {
-    this.values.push(value);
-  }
-  public pop(): RuntimeValue {
-    const value = this.values.pop();
-    if (!value) throw new Error("Cannot pop an empty stack.");
-    return value;
-  }
-  public peek(): RuntimeValue {
-    const value = this.values[this.values.length - 1];
-    if (!value) throw new Error("Cannot peek an empty stack.");
-    return value;
-  }
-  public get length(): number {
-    return this.values.length;
-  }
-}
-
 export class FunctionValue extends RuntimeObject {
   public readonly kind = "function" as const;
   public readonly runtimeType = "Function";
@@ -207,8 +172,6 @@ export class FunctionValue extends RuntimeObject {
 export function displayValue(value: RuntimeValue): string {
   if (value instanceof ArrayValue)
     return `[${value.values.map(displayValue).join(", ")}]`;
-  if (value instanceof StackValue)
-    return `Stack(${value.values.map(displayValue).join(", ")})`;
   if (value instanceof ArrayPointerValue)
     return `&${value.array.id}[${value.index}]`;
   if (value instanceof FunctionValue) return `<function ${value.name}>`;

@@ -26,7 +26,7 @@ export class ExecutionTrace {
     this.events.push(event);
   }
   public all(): readonly ExecutionEvent[] {
-    return this.events;
+    return [...this.events];
   }
   public clear(): void {
     this.events.length = 0;
