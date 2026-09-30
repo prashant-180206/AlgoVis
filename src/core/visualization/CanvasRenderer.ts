@@ -1,7 +1,16 @@
-import { VisualArray, VisualizationState } from "./VisualizationState";
+import {
+  VisualArray,
+  VisualStack,
+  VisualizationState,
+} from "./VisualizationState";
 
 export class CanvasRenderer {
-  public render(context: CanvasRenderingContext2D, state: VisualizationState, width: number, height: number): void {
+  public render(
+    context: CanvasRenderingContext2D,
+    state: VisualizationState,
+    width: number,
+    height: number,
+  ): void {
     context.clearRect(0, 0, width, height);
     this.drawBackdrop(context, width, height);
     if (state.objects.length === 0) {
@@ -9,12 +18,24 @@ export class CanvasRenderer {
       return;
     }
 
-    const rowHeight = Math.max(150, Math.min(210, (height - 48) / state.objects.length));
-    state.objects.forEach((object, row) => this.drawArray(context, object, 28, 24 + row * rowHeight, width - 56, rowHeight - 24));
+    const rowHeight = Math.max(
+      150,
+      Math.min(210, (height - 48) / state.objects.length),
+    );
+    state.objects.forEach((object, row) => {
+      const y = 24 + row * rowHeight;
+      if (object.type === "array")
+        this.drawArray(context, object, 28, y, width - 56, rowHeight - 24);
+      else this.drawStack(context, object, 28, y, width - 56, rowHeight - 24);
+    });
     this.drawFooter(context, state, width, height);
   }
 
-  private drawBackdrop(context: CanvasRenderingContext2D, width: number, height: number): void {
+  private drawBackdrop(
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+  ): void {
     context.fillStyle = "#121714";
     context.fillRect(0, 0, width, height);
     context.strokeStyle = "#1d2921";
@@ -33,14 +54,30 @@ export class CanvasRenderer {
     }
   }
 
-  private drawArray(context: CanvasRenderingContext2D, object: VisualArray, x: number, y: number, width: number, height: number): void {
+  private drawArray(
+    context: CanvasRenderingContext2D,
+    object: VisualArray,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): void {
     context.fillStyle = "#a9baaa";
     context.font = "11px 'IBM Plex Mono', monospace";
     context.fillText(object.label.toUpperCase(), x, y + 2);
 
     const gap = 8;
-    const tileWidth = Math.max(48, Math.min(110, (width - gap * Math.max(0, object.values.length - 1)) / Math.max(1, object.values.length)));
-    const totalWidth = object.values.length * tileWidth + Math.max(0, object.values.length - 1) * gap;
+    const tileWidth = Math.max(
+      48,
+      Math.min(
+        110,
+        (width - gap * Math.max(0, object.values.length - 1)) /
+          Math.max(1, object.values.length),
+      ),
+    );
+    const totalWidth =
+      object.values.length * tileWidth +
+      Math.max(0, object.values.length - 1) * gap;
     const startX = x + Math.max(0, (width - totalWidth) / 2);
     const tileY = y + 28;
     object.values.forEach((value, index) => {
@@ -62,7 +99,51 @@ export class CanvasRenderer {
     });
   }
 
-  private drawFooter(context: CanvasRenderingContext2D, state: VisualizationState, width: number, height: number): void {
+  private drawStack(
+    context: CanvasRenderingContext2D,
+    object: VisualStack,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ): void {
+    context.fillStyle = "#a9baaa";
+    context.font = "11px 'IBM Plex Mono', monospace";
+    context.fillText(`${object.label.toUpperCase()} / STACK`, x, y + 2);
+    const tileWidth = Math.min(150, width * 0.4);
+    const tileHeight = Math.min(
+      42,
+      Math.max(28, (height - 28) / Math.max(1, object.values.length)),
+    );
+    const startX = x + (width - tileWidth) / 2;
+    const startY = y + 18;
+    [...object.values].reverse().forEach((value, index) => {
+      const tileY = startY + index * tileHeight;
+      context.fillStyle = index === 0 ? "#d7f56b" : "#253229";
+      context.strokeStyle = index === 0 ? "#eaff9b" : "#526456";
+      context.fillRect(startX, tileY, tileWidth, tileHeight - 5);
+      context.strokeRect(startX, tileY, tileWidth, tileHeight - 5);
+      context.fillStyle = index === 0 ? "#172014" : "#e1e9df";
+      context.textAlign = "center";
+      context.font = "600 15px 'IBM Plex Mono', monospace";
+      context.fillText(
+        value,
+        startX + tileWidth / 2,
+        tileY + tileHeight / 2 + 5,
+      );
+      context.textAlign = "left";
+    });
+    context.fillStyle = "#7d8e80";
+    context.font = "10px 'IBM Plex Mono', monospace";
+    context.fillText("TOP", startX + tileWidth + 10, startY + 14);
+  }
+
+  private drawFooter(
+    context: CanvasRenderingContext2D,
+    state: VisualizationState,
+    width: number,
+    height: number,
+  ): void {
     context.fillStyle = "#7f9182";
     context.font = "11px 'IBM Plex Sans', sans-serif";
     context.fillText(`STEP ${state.stepIndex}`, 28, height - 18);
@@ -71,11 +152,19 @@ export class CanvasRenderer {
     context.textAlign = "left";
   }
 
-  private drawEmptyState(context: CanvasRenderingContext2D, width: number, height: number): void {
+  private drawEmptyState(
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+  ): void {
     context.fillStyle = "#8d9c90";
     context.font = "14px 'IBM Plex Sans', sans-serif";
     context.textAlign = "center";
-    context.fillText("Run or step the program to materialize runtime objects", width / 2, height / 2);
+    context.fillText(
+      "Run or step the program to materialize runtime objects",
+      width / 2,
+      height / 2,
+    );
     context.textAlign = "left";
   }
 }

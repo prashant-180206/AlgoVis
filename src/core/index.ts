@@ -6,6 +6,7 @@ export * from "./language/Parser";
 export * from "./language/SourceLocation";
 export * from "./language/Token";
 export * from "./runtime/Runtime";
+export * from "./runtime/RuntimeClass";
 export * from "./runtime/Scope";
 export * from "./runtime/Values";
 export * from "./visualization/CanvasRenderer";

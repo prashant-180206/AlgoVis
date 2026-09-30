@@ -1,6 +1,12 @@
 import { ExecutionEventType } from "../execution/ExecutionEvent";
 import { RuntimeSnapshot } from "../runtime/Runtime";
-import { ArrayValue, displayValue, PrimitiveValue, RuntimeValue } from "../runtime/Values";
+import {
+  ArrayValue,
+  displayValue,
+  PrimitiveValue,
+  RuntimeValue,
+  StackValue,
+} from "../runtime/Values";
 
 export interface VisualArray {
   readonly type: "array";
@@ -10,19 +16,43 @@ export interface VisualArray {
   readonly activeIndices: readonly number[];
 }
 
+export interface VisualStack {
+  readonly type: "stack";
+  readonly id: string;
+  readonly label: string;
+  readonly values: readonly string[];
+}
+
 export interface VisualizationState {
-  readonly objects: readonly VisualArray[];
+  readonly objects: readonly (VisualArray | VisualStack)[];
   readonly activeOperation?: ExecutionEventType;
   readonly stepIndex: number;
 }
 
 export class VisualizationProjector {
   public project(snapshot: RuntimeSnapshot): VisualizationState {
-    const objects = snapshot.globals
-      .filter(({ value }) => value instanceof ArrayValue)
-      .map(({ name, value }) => this.projectArray(name, value as ArrayValue));
+    const objects: (VisualArray | VisualStack)[] = [];
+    snapshot.globals.forEach(({ name, value }) => {
+      if (value instanceof ArrayValue)
+        objects.push(this.projectArray(name, value));
+      if (value instanceof StackValue)
+        objects.push(this.projectStack(name, value));
+    });
     const lastEvent = snapshot.events[snapshot.events.length - 1];
-    return { objects, activeOperation: lastEvent?.type, stepIndex: snapshot.stepIndex };
+    return {
+      objects,
+      activeOperation: lastEvent?.type,
+      stepIndex: snapshot.stepIndex,
+    };
+  }
+
+  private projectStack(label: string, value: StackValue): VisualStack {
+    return {
+      type: "stack",
+      id: value.id,
+      label,
+      values: value.values.map((item) => this.display(item)),
+    };
   }
 
   private projectArray(label: string, value: ArrayValue): VisualArray {
@@ -36,6 +66,8 @@ export class VisualizationProjector {
   }
 
   private display(value: RuntimeValue): string {
-    return value instanceof PrimitiveValue ? displayValue(value) : displayValue(value);
+    return value instanceof PrimitiveValue
+      ? displayValue(value)
+      : displayValue(value);
   }
 }

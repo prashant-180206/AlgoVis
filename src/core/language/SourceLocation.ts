@@ -12,7 +12,11 @@ export class SourceLocation {
     public readonly end: SourcePosition,
   ) {}
 
-  public static point(line: number, column: number, offset: number): SourceLocation {
+  public static point(
+    line: number,
+    column: number,
+    offset: number,
+  ): SourceLocation {
     const position = new SourcePosition(line, column, offset);
     return new SourceLocation(position, position);
   }

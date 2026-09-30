@@ -7,6 +7,7 @@ export enum ExecutionEventType {
   Write = "WRITE",
   Compare = "COMPARE",
   Call = "CALL",
+  Method = "METHOD",
   Return = "RETURN",
   Error = "ERROR",
   ProgramFinished = "PROGRAM_FINISHED",
@@ -21,7 +22,13 @@ export interface ExecutionEvent {
 export class ExecutionTrace {
   private readonly events: ExecutionEvent[] = [];
 
-  public record(event: ExecutionEvent): void { this.events.push(event); }
-  public all(): readonly ExecutionEvent[] { return this.events; }
-  public clear(): void { this.events.length = 0; }
+  public record(event: ExecutionEvent): void {
+    this.events.push(event);
+  }
+  public all(): readonly ExecutionEvent[] {
+    return this.events;
+  }
+  public clear(): void {
+    this.events.length = 0;
+  }
 }

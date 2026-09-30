@@ -26,6 +26,23 @@ source -> Lexer -> Parser -> AST -> Interpreter -> Runtime + ExecutionTrace -> U
 
 A feature is incomplete until it has syntax, AST representation, runtime semantics, an observable event where appropriate, and a testable error path.
 
+## Typed language syntax
+
+The initial type syntax is declaration-first and intentionally small:
+
+```text
+Number xy = 23
+String s = "sample"
+Array<Number> arr = [2, 3, 4]
+Stack<Number> st
+Number len = arr.length()
+st.push(xy)
+```
+
+Type names are parsed as `TypeReference` nodes. Generic arguments are checked when a value is declared and are enforced again by mutating methods such as `Stack<Number>.push` and `ArrayPointer.set`. New classes can add their own generic rules through `RuntimeClassDefinition.isAssignable`.
+
+The lexer and AST already reserve control-flow tokens and block nodes. Loops should be added as the next language milestone, with explicit `ForStatement`/`WhileStatement` nodes and interpreter continuations so stepping remains deterministic.
+
 ## Adding a runtime data structure
 
 Create a class in `src/core/runtime` rather than a React component. The class should own computational state and expose small operations:
@@ -41,6 +58,21 @@ export class StackValue {
 ```
 
 Represent the value in the `RuntimeValue` union, install a language builtin that creates it, and emit events from operations such as `PUSH` and `POP`. A renderer should consume a serializable visualization projection later; it should not receive the class instance.
+
+Register the class methods through `RuntimeClassRegistry` rather than adding `instanceof` branches to the parser. A class definition provides a name, generic assignability rules, and a method map:
+
+```ts
+runtime.classes.register({
+  name: "Queue",
+  methods: new Map([
+    ["enqueue", (receiver, args, runtime) => {
+      // mutate the QueueValue, emit an event, and return a RuntimeValue
+    }],
+  ]),
+});
+```
+
+The interpreter resolves `object.method(...)` through this registry. That means a future `TreeValue` or user-defined structure can add methods without changing member-expression parsing. Keep type checking in the class definition's `isAssignable` function, and keep drawing in the visualization projection/renderer layer.
 
 ## Adding a visualization
 
