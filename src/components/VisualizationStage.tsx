@@ -8,18 +8,23 @@ interface VisualizationStageProps {
   visualization: VisualizationState;
   stepIndex: number;
   stepCount: number;
+  /** Extension point for registering class-specific Pixi renderers. */
+  configureRenderer?: (renderer: PixiRenderer) => void;
 }
 
 export function VisualizationStage({
   visualization,
   stepIndex,
   stepCount,
+  configureRenderer,
 }: VisualizationStageProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<PixiRenderer | undefined>(undefined);
   const latestState = useRef(visualization);
+  const latestConfigure = useRef(configureRenderer);
   const [ready, setReady] = useState(false);
   latestState.current = visualization;
+  latestConfigure.current = configureRenderer;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -27,6 +32,7 @@ export function VisualizationStage({
     let cancelled = false;
     const renderer = new PixiRenderer();
     rendererRef.current = renderer;
+    latestConfigure.current?.(renderer);
     void renderer
       .init(host)
       .then(() => {

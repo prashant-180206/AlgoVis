@@ -1,10 +1,14 @@
 import { Application, Container, Graphics, Text } from "pixi.js";
+import {
+  buildEnvironmentForest,
+  type EnvironmentTreeNode,
+} from "./EnvironmentTree";
 import type {
   VisualArray,
   VisualEnvironment,
   VisualInstance,
   VisualObjectNode,
-  VisualStack,
+  VisualVariable,
   VisualizationState,
 } from "./VisualizationState";
 
@@ -30,6 +34,13 @@ const COLORS = {
 interface Point {
   x: number;
   y: number;
+}
+
+interface EnvironmentLayout {
+  readonly node: EnvironmentTreeNode<VisualEnvironment>;
+  readonly variables: readonly VisualVariable[];
+  readonly children: readonly EnvironmentLayout[];
+  readonly height: number;
 }
 
 export interface PixiTextOptions {
@@ -166,11 +177,15 @@ export class PixiRenderer {
     this.clearContent();
     const width = this.app.screen.width;
     const height = this.app.screen.height;
-    const environments = this.state.environments.filter(
-      (environment) => environment.active,
-    );
+    const forest = buildEnvironmentForest(this.state.environments, {
+      shouldInclude: (environment) => environment.active,
+      includeAncestors: (environment) =>
+        environment.kind === "global" ||
+        environment.variables.some((variable) => !variable.builtin),
+      rootId: this.state.rootEnvironmentId,
+    });
     let y = 22;
-    y = this.drawEnvironments(environments, width, y);
+    y = this.drawEnvironmentForest(forest, width, y);
     if (this.state.objects.length > 0) {
       y += 18;
       this.addText("DATA STRUCTURES", 26, y, {
@@ -196,7 +211,7 @@ export class PixiRenderer {
       });
       y += Math.ceil(this.state.objects.length / columns) * rowHeight;
     }
-    if (environments.length === 0 && this.state.objects.length === 0) {
+    if (forest.length === 0 && this.state.objects.length === 0) {
       this.addText(
         "Run or step the program to materialize runtime objects",
         width / 2,
@@ -211,75 +226,148 @@ export class PixiRenderer {
     children.forEach((child) => child.destroy({ children: true }));
   }
 
-  private drawEnvironments(
-    environments: readonly VisualEnvironment[],
+  private drawEnvironmentForest(
+    forest: readonly EnvironmentTreeNode<VisualEnvironment>[],
     width: number,
     y: number,
   ): number {
-    if (environments.length === 0) return y;
-    const gap = 14;
-    const columns = Math.max(1, Math.floor((width - 48) / 300));
-    const cardWidth = (width - 48 - (columns - 1) * gap) / columns;
-    const cardHeight = 134;
-    environments.forEach((environment, index) => {
-      const column = index % columns;
-      const row = Math.floor(index / columns);
-      const x = 24 + column * (cardWidth + gap);
-      const cardY = y + row * (cardHeight + gap);
-      const card = new Graphics();
-      card
-        .roundRect(x, cardY, cardWidth, cardHeight, 10)
-        .fill(environment.active ? COLORS.card : COLORS.cardInactive)
-        .stroke({
-          width: environment.active ? 1.5 : 1,
-          color: environment.active
-            ? COLORS.cardStrokeActive
-            : COLORS.cardStroke,
-        });
-      this.content.addChild(card);
-      this.addText(`${environment.kind.toUpperCase()} / ${environment.id}`, x + 12, cardY + 11, {
-        size: 11,
-        color: COLORS.title,
-        bold: true,
-      });
-      this.addText(
-        environment.parentId ? `parent ${environment.parentId}` : "root scope",
-        x + 12,
-        cardY + 28,
-        { size: 9, color: COLORS.muted },
-      );
-      if (environment.variables.length === 0) {
-        this.addText("no bindings", x + 12, cardY + 50, {
-          size: 11,
-          color: COLORS.muted,
-        });
-        return;
-      }
-      const variables = environment.variables.filter(
-        (variable) => !variable.builtin,
-      );
-      if (variables.length === 0) {
-        this.addText("no user bindings", x + 12, cardY + 50, {
-          size: 11,
-          color: COLORS.muted,
-        });
-        return;
-      }
-      variables.slice(0, 5).forEach((variable, variableIndex) => {
-        const rowY = cardY + 48 + variableIndex * 16;
-        this.addText(this.truncate(`${variable.name} = ${variable.value}`, Math.floor(cardWidth / 7)), x + 12, rowY, {
-          size: 11,
-          color: variable.isObject ? COLORS.value : COLORS.text,
-        });
-      });
-      if (variables.length > 5) {
-        this.addText(`+${variables.length - 5} more bindings`, x + 12, cardY + 48 + 5 * 16, {
-          size: 9,
-          color: COLORS.muted,
-        });
-      }
+    if (forest.length === 0) return y;
+    const rootWidth = Math.max(320, Math.min(width - 48, 860));
+    this.addText("ENVIRONMENT NEST", 26, y, {
+      size: 10,
+      color: COLORS.muted,
+      bold: true,
     });
-    return y + Math.ceil(environments.length / columns) * (cardHeight + gap);
+    this.addText("outer scope → nested block scope", 26, y + 15, {
+      size: 9,
+      color: 0x4f5e51,
+    });
+    let cursorY = y + 34;
+    forest.forEach((node) => {
+      const layout = this.layoutEnvironment(node, rootWidth);
+      this.drawEnvironmentNode(layout, 24, cursorY, rootWidth, 0);
+      cursorY += layout.height + 16;
+    });
+    return cursorY;
+  }
+
+  private layoutEnvironment(
+    node: EnvironmentTreeNode<VisualEnvironment>,
+    width: number,
+  ): EnvironmentLayout {
+    const variables = node.environment.variables.filter(
+      (variable) => !variable.builtin,
+    );
+    const childWidth = Math.max(220, width - 26);
+    const children = node.children.map((child) =>
+      this.layoutEnvironment(child, childWidth),
+    );
+    const variableRows = Math.max(1, variables.length);
+    const childrenHeight =
+      children.length === 0
+        ? 0
+        : 4 +
+          children.reduce((total, child) => total + child.height + 8, 0);
+    const height = 36 + variableRows * 16 + 8 + childrenHeight;
+    return { node, variables, children, height };
+  }
+
+  private drawEnvironmentNode(
+    layout: EnvironmentLayout,
+    x: number,
+    y: number,
+    width: number,
+    depth: number,
+  ): void {
+    const environment = layout.node.environment;
+    const active = environment.active;
+    const panel = new Graphics();
+    panel
+      .roundRect(x, y, width, layout.height, 9)
+      .fill(active ? COLORS.card : COLORS.cardInactive)
+      .stroke({
+        width: active ? 1.5 : 1,
+        color: active ? COLORS.cardStrokeActive : COLORS.cardStroke,
+        alpha: active ? 1 : 0.55,
+      });
+    this.content.addChild(panel);
+
+    const title = `${depth > 0 ? "↳ " : ""}${environment.kind.toUpperCase()} · ${environment.id}`;
+    this.addText(title, x + 12, y + 10, {
+      size: 10,
+      color: active ? COLORS.title : 0x8a9a8c,
+      bold: true,
+    });
+    this.addText(
+      layout.variables.length === 0
+        ? "no bindings"
+        : `${layout.variables.length} binding${layout.variables.length === 1 ? "" : "s"}`,
+      x + width - 12,
+      y + 11,
+      {
+        size: 9,
+        color: active ? COLORS.muted : 0x4b5a4d,
+        anchorX: 1,
+      },
+    );
+
+    const separator = new Graphics();
+    separator
+      .moveTo(x + 10, y + 28)
+      .lineTo(x + width - 10, y + 28)
+      .stroke({ width: 1, color: COLORS.cardStroke, alpha: 0.35 });
+    this.content.addChild(separator);
+
+    const variableStart = y + 36;
+    if (layout.variables.length === 0) {
+      this.addText(
+        active ? "no user bindings" : "scope context",
+        x + 12,
+        variableStart + 2,
+        { size: 11, color: COLORS.muted },
+      );
+    } else {
+      const maxCharacters = Math.max(
+        8,
+        Math.floor((width - 24) / 6.2),
+      );
+      layout.variables.forEach((variable, index) => {
+        this.addText(
+          this.truncate(`${variable.name} = ${variable.value}`, maxCharacters),
+          x + 12,
+          variableStart + index * 16,
+          {
+            size: 11,
+            color: active
+              ? variable.isObject
+                ? COLORS.value
+                : COLORS.text
+              : 0x8b968c,
+          },
+        );
+      });
+    }
+
+    if (layout.children.length === 0) return;
+
+    const childX = x + 16;
+    const childWidth = Math.max(220, width - 26);
+    const childStart =
+      variableStart + Math.max(1, layout.variables.length) * 16 + 4;
+    const guideHeight =
+      layout.children.reduce((total, child) => total + child.height + 8, 0) - 8;
+    const guide = new Graphics();
+    guide
+      .moveTo(x + 9, y + 30)
+      .lineTo(x + 9, childStart + Math.max(0, guideHeight))
+      .stroke({ width: 1, color: COLORS.cardStroke, alpha: 0.55 });
+    this.content.addChild(guide);
+
+    let childY = childStart;
+    layout.children.forEach((child) => {
+      this.drawEnvironmentNode(child, childX, childY, childWidth, depth + 1);
+      childY += child.height + 8;
+    });
   }
 
   private drawObject(
@@ -291,8 +379,6 @@ export class PixiRenderer {
   ): void {
     if (object.type === "array")
       this.drawArray(object, x, y, width, height);
-    else if (object.type === "stack")
-      this.drawStack(object, x, y, width, height);
     else if (object.type === "instance") {
       const specialRenderer = this.specialRenderers.get(object.className);
       if (specialRenderer) {
@@ -373,49 +459,6 @@ export class PixiRenderer {
         color: active ? COLORS.title : COLORS.muted,
         anchorX: 0.5,
       });
-    });
-  }
-
-  private drawStack(
-    object: VisualStack,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-  ): void {
-    this.addText(`${object.label.toUpperCase()} / STACK`, x, y, {
-      size: 10,
-      color: COLORS.title,
-      bold: true,
-    });
-    const tileWidth = Math.min(160, width * 0.55);
-    const startX = x + (width - tileWidth) / 2;
-    const tileHeight = Math.min(
-      30,
-      Math.max(20, (height - 24) / Math.max(1, object.values.length)),
-    );
-    [...object.values].reverse().forEach((value, index) => {
-      const tileY = y + 20 + index * tileHeight;
-      const active = index === 0;
-      const tile = new Graphics();
-      tile
-        .roundRect(startX, tileY, tileWidth, tileHeight - 4, 4)
-        .fill(active ? COLORS.tileActive : COLORS.tile)
-        .stroke({
-          width: active ? 2 : 1,
-          color: active ? COLORS.tileActiveStroke : COLORS.tileStroke,
-        });
-      this.content.addChild(tile);
-      this.addText(value, startX + tileWidth / 2, tileY + (tileHeight - 4) / 2 - 7, {
-        size: 13,
-        color: active ? COLORS.tileActiveText : COLORS.text,
-        bold: true,
-        anchorX: 0.5,
-      });
-    });
-    this.addText("TOP", startX + tileWidth + 8, y + 24, {
-      size: 9,
-      color: COLORS.muted,
     });
   }
 

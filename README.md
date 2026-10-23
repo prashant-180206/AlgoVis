@@ -57,6 +57,7 @@ The toolbar is implemented in `App.tsx` and provides:
 - Speed slider: controls the playback interval from 900 ms to 150 ms per step.
 - Timeline slider: scrub every recorded statement step, including nested loop and function statements.
 - Status readout: current line, latest event type, and step position.
+- Module status and reload control when the program imports source modules. Execution controls wait for imports to finish loading.
 
 The step controls operate on `Interpreter.steps`, a pre-recorded timeline of `RuntimeSnapshot`s. Browsing the timeline does not mutate the interpreter state.
 
@@ -66,11 +67,12 @@ The step controls operate on `Interpreter.steps`, a pre-recorded timeline of `Ru
 
 It displays:
 
-- Active environment cards and their user variable bindings.
+- Nested environment blocks (global, module, function, and block scopes) with their user variable bindings. Ancestor scopes remain visible as dim context, so nested blocks read as blocks inside blocks.
 - Arrays with indexed tiles and active-index highlighting.
-- User classes named `Stack` (with an `items` array) as top-first stacks.
-- Generic objects and class instances as field panels.
+- Generic objects and class instances as field panels. Linked nodes and other references are projected recursively and cycle-safely.
 - A step number and active operation footer.
+
+`Stack`, `Queue`, `LinkedList`, and other user classes use the same generic instance projection. There is no class-name special case in the projector; add a class-specific visual with the renderer registry when generic fields are not enough.
 
 The canvas supports:
 
@@ -79,7 +81,7 @@ The canvas supports:
 - Fit visualization to reset the viewport.
 - Fullscreen mode for the visualization surface.
 
-`src/core/visualization/PixiRenderer.ts` builds the PixiJS scene graph from the projected state. It does not read scopes or runtime values directly. `CanvasRenderer.ts` is retained as a Canvas 2D fallback.
+`src/core/visualization/PixiRenderer.ts` builds the PixiJS scene graph from the projected state. It does not read scopes or runtime values directly. `CanvasRenderer.ts` is retained as a flat Canvas 2D fallback. `VisualizationStage` accepts an optional `configureRenderer` callback so class-specific Pixi renderers can be registered during initialization.
 
 ### 5. Runtime inspector
 
@@ -87,7 +89,8 @@ The canvas supports:
 
 It shows:
 
-- Active environments and their variables, with an option to reveal retained scopes.
+- The active environment forest, with nested blocks inside their parent scopes and an option to reveal retained scopes.
+- Module, function, and block scope context, including inactive ancestors that own the bindings used by the active frame.
 - Runtime types, formatted values, and object/class metadata.
 - Variables changed by the previous step highlighted in amber.
 - Host built-ins such as `console`, `Number`, `String`, and `Array`, hidden by default.
@@ -160,7 +163,8 @@ AlgoVis/
 ├── docs/
 │   ├── architecture.md       Core architecture and extension guide
 │   └── ...
-├── public/                   Static public assets
+├── public/
+│   └── modules/              Importable AlgoVis source modules
 ├── src/
 │   ├── App.tsx               UI composition and execution coordination
 │   ├── App.css               Application-level styling
@@ -172,10 +176,11 @@ AlgoVis/
 │   │   └── ui/               Reusable button, card, badge, separator UI
 │   └── core/
 │       ├── execution/        Events and execution trace
-│       ├── interpreter/       AST evaluation and stepping
+│       ├── interpreter/       AST evaluation, stepping, module evaluation
 │       ├── language/          Lexer, parser, tokens, AST, locations
+│       ├── modules/           Source-only module registry and URL resolution
 │       ├── runtime/           Values, scopes, classes, snapshots
-│       └── visualization/     Snapshot projection and PixiJS drawing
+│       └── visualization/     Snapshot projection, environment trees, Pixi drawing
 ├── src-tauri/                Rust/Tauri desktop shell
 ├── index.html                Vite HTML entry point
 ├── package.json              Scripts and dependencies
@@ -194,9 +199,25 @@ See [docs/architecture.md](docs/architecture.md) for the detailed core reference
 
 1. `new Lexer(source).tokenize()`.
 2. `new Parser(tokens).parse()`.
-3. `new Interpreter(program)`.
+3. `new Interpreter(program, new Runtime(), modules)`.
 
 Any lexer or parser error is stored as a UI error and prevents execution controls from running an invalid program.
+
+### Source modules
+
+Programs can import reusable classes from JavaScript-like source files:
+
+```js
+import { Stack } from "./modules/structures.js";
+import * as structures from "./modules/structures.js";
+import "./modules/setup.js";
+```
+
+`App.tsx` scans the parsed program for import declarations, fetches each module, validates it with the AlgoVis parser, and recursively loads nested imports. Module URLs are resolved relative to the importing module, with the page URL as the base for the entry program. The sample structures live in `public/modules/structures.js`, so `./modules/structures.js` works in development and in the production bundle.
+
+Imports are interpreted by AlgoVis; module source is never executed by the browser's JavaScript engine. All top-level module declarations are implicitly exported, and an optional `export` keyword is accepted for readability. Named imports, aliases, namespace imports, and side-effect imports are supported. Imported bindings are copied values rather than live bindings.
+
+Module top-level execution suppresses timeline steps and execution events so module setup does not appear in the main program trace. Imported module scopes are retained and shown as `module` environments when they are active context for a frame. Use the module status/reload control in the header after editing a module file; playback is disabled while imports are loading.
 
 ### Execution, steps, and history
 
@@ -223,12 +244,12 @@ A snapshot contains:
 
 ```text
 RuntimeSnapshot
-  -> VisualEnvironment[]
-  -> VisualArray[] / VisualStack[] / VisualInstance[] / VisualObject[]
+  -> VisualEnvironment[] (nested with EnvironmentTree)
+  -> VisualArray[] / VisualInstance[] / VisualObject[]
   -> PixiRenderer
 ```
 
-The renderer receives no AST nodes, scopes, React state, or mutable runtime objects. This separation allows future Queue, LinkedList, Tree, or graph renderers to be added without changing the interpreter. Host bindings such as `console` are flagged as built-ins and filtered from the visualization.
+The renderer receives no AST nodes, scopes, React state, or mutable runtime objects. Environment trees are built from parent IDs, and object projection is identity-based and cycle-safe, so shared references and linked structures do not recurse forever. This separation allows future Queue, LinkedList, Tree, or graph renderers to be added without changing the interpreter. Host bindings such as `console` are flagged as built-ins and filtered from the visualization.
 
 ### Adding class-specific visuals
 
@@ -240,13 +261,28 @@ renderer.registerClassRenderer("Queue", (context, object, x, y, width, height) =
 });
 ```
 
-Runtime behavior belongs in `src/core/runtime` and `src/core/interpreter`. Drawing behavior belongs in `src/core/visualization`.
+Register it when the stage is created:
+
+```tsx
+<VisualizationStage
+  visualization={visualization}
+  stepIndex={stepIndex}
+  stepCount={steps.length}
+  configureRenderer={(renderer) => {
+    renderer.registerClassRenderer("Queue", drawQueue);
+  }}
+/>
+```
+
+Runtime behavior belongs in `src/core/runtime` and `src/core/interpreter`. Drawing behavior belongs in `src/core/visualization`. User classes are never special-cased by name in the projector.
 
 ## Current language example
 
-The starter program demonstrates loops, arrays, a user-defined class, instance fields, method calls, mutation, and output:
+The starter program demonstrates imports, loops, arrays, instance fields, method calls, mutation, and output:
 
 ```js
+import { Stack } from "./modules/structures.js";
+
 let numbers = [5, 2, 9, 1, 7, 3];
 let total = 0;
 
@@ -255,18 +291,14 @@ for (let index = 0; index < numbers.length; index++) {
   console.log("running total", total);
 }
 
-class Stack {
-  constructor() { this.items = []; }
-  push(value) { this.items.push(value); }
-  pop() { return this.items.pop(); }
-}
-
 let stack = new Stack();
 stack.push(10);
 stack.push(20);
 let top = stack.pop();
 console.log("top", top, "total", total);
 ```
+
+`public/modules/structures.js` also provides `Queue`, `ListNode`, `LinkedList`, and `TreeNode` as examples for custom data-structure programs.
 
 ## Development conventions
 
@@ -278,6 +310,8 @@ console.log("top", top, "total", total);
 - Emit events for operations that need timeline or animation visibility.
 - Record a `Runtime.recordStep()` entry for new statement types so the step debugger can pause there.
 - Keep PixiJS and Canvas renderers independent from runtime classes.
+- Do not special-case user class names in the projector; use `registerClassRenderer()` for class-specific visuals.
+- Keep imported modules in source form and evaluate them through the AlgoVis interpreter, never host `eval` or dynamic JavaScript execution.
 - Prefer focused changes and run `pnpm build` after core or UI changes.
 
 ## Related documentation

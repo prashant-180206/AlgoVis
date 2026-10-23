@@ -12,6 +12,8 @@ import {
   FunctionDeclaration,
   IdentifierExpression,
   IfStatement,
+  ImportDeclaration,
+  ImportSpecifier,
   IndexExpression,
   LiteralExpression,
   MemberExpression,
@@ -46,7 +48,13 @@ export class Parser {
     const statements: Statement[] = [];
     this.skipSeparators();
     while (!this.check(TokenType.Eof)) {
-      statements.push(this.statement());
+      if (this.match(TokenType.Import)) {
+        statements.push(this.importDeclaration(this.previous()));
+      } else if (this.match(TokenType.Export)) {
+        statements.push(this.exportDeclaration(this.previous()));
+      } else {
+        statements.push(this.statement());
+      }
       this.skipSeparators();
     }
     return new Program(
@@ -55,7 +63,90 @@ export class Parser {
     );
   }
 
+  private importDeclaration(keyword: Token): ImportDeclaration {
+    this.skipNewlines();
+    if (this.match(TokenType.String)) {
+      const source = this.previous();
+      this.consumeOptionalSemicolon();
+      return new ImportDeclaration(
+        this.join(keyword.location, source.location),
+        source.literal as string,
+      );
+    }
+
+    const specifiers: ImportSpecifier[] = [];
+    let namespace: string | undefined;
+    if (this.match(TokenType.Star)) {
+      this.skipNewlines();
+      this.consume(TokenType.As, "Expected 'as' after '*' in import.");
+      this.skipNewlines();
+      namespace = this.consume(
+        TokenType.Identifier,
+        "Expected a namespace name after 'as'.",
+      ).lexeme;
+    } else {
+      this.consume(
+        TokenType.LeftBrace,
+        "Expected '{', '*', or a module path after 'import'.",
+      );
+      this.skipNewlines();
+      while (!this.check(TokenType.RightBrace)) {
+        const imported = this.consume(
+          TokenType.Identifier,
+          "Expected an imported name.",
+        ).lexeme;
+        let local = imported;
+        this.skipNewlines();
+        if (this.match(TokenType.As)) {
+          this.skipNewlines();
+          local = this.consume(
+            TokenType.Identifier,
+            "Expected a local name after 'as'.",
+          ).lexeme;
+        }
+        specifiers.push({ imported, local });
+        this.skipNewlines();
+        if (!this.match(TokenType.Comma)) break;
+        this.skipNewlines();
+      }
+      this.consume(TokenType.RightBrace, "Expected '}' after import list.");
+    }
+
+    this.skipNewlines();
+    this.consume(TokenType.From, "Expected 'from' after import list.");
+    this.skipNewlines();
+    const source = this.consume(
+      TokenType.String,
+      "Expected a module path string.",
+    );
+    this.consumeOptionalSemicolon();
+    return new ImportDeclaration(
+      this.join(keyword.location, source.location),
+      source.literal as string,
+      specifiers,
+      namespace,
+    );
+  }
+
+  private exportDeclaration(keyword: Token): Statement {
+    if (this.match(TokenType.Class))
+      return this.classDeclaration(this.previous());
+    if (this.match(TokenType.Function))
+      return this.functionDeclaration(this.previous());
+    if (this.match(TokenType.Let, TokenType.Const, TokenType.Var))
+      return this.variableDeclaration(this.previous());
+    throw new ParserError(
+      "Expected a class, function, or variable declaration after 'export'.",
+      keyword.location,
+    );
+  }
+
   private statement(): Statement {
+    if (this.check(TokenType.Import) || this.check(TokenType.Export))
+      throw new ParserError(
+        "Import and export declarations are only allowed at the top level.",
+        this.peek().location,
+      );
     if (this.match(TokenType.LeftBrace)) return this.block(this.previous());
     if (this.match(TokenType.Let, TokenType.Const, TokenType.Var))
       return this.variableDeclaration(this.previous());
@@ -498,6 +589,9 @@ export class Parser {
   }
   private skipSeparators(): void {
     while (this.match(TokenType.Newline, TokenType.Semicolon)) {}
+  }
+  private skipNewlines(): void {
+    while (this.match(TokenType.Newline)) {}
   }
   private consumeOptionalSemicolon(): void {
     this.match(TokenType.Semicolon);

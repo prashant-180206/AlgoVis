@@ -28,6 +28,20 @@ export class Program extends AstNode {
     super(location);
   }
 }
+export interface ImportSpecifier {
+  readonly imported: string;
+  readonly local: string;
+}
+export class ImportDeclaration extends Statement {
+  public constructor(
+    location: SourceLocation,
+    public readonly source: string,
+    public readonly specifiers: readonly ImportSpecifier[] = [],
+    public readonly namespace?: string,
+  ) {
+    super(location);
+  }
+}
 export class IdentifierExpression extends Expression {
   public constructor(
     location: SourceLocation,

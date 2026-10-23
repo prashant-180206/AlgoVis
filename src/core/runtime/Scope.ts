@@ -62,6 +62,16 @@ export class Scope {
     return this.bindings.has(name) || (this.parent?.has(name) ?? false);
   }
 
+  /** Checks only the bindings declared directly in this scope. */
+  public hasOwn(name: string): boolean {
+    return this.bindings.has(name);
+  }
+
+  /** Reads a binding declared directly in this scope. */
+  public getOwn(name: string): RuntimeValue | undefined {
+    return this.bindings.get(name);
+  }
+
   public entries(): readonly [string, RuntimeValue][] {
     return [...this.bindings.entries()];
   }

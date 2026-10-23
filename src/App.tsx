@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Boxes,
   ChevronLeft,
@@ -6,18 +6,24 @@ import {
   CirclePause,
   CirclePlay,
   FastForward,
+  FileCode2,
   Gauge,
+  RefreshCw,
   RotateCcw,
   Settings2,
   Sparkles,
 } from "lucide-react";
 import {
   ExecutionEventType,
+  ImportDeclaration,
   Interpreter,
   InterpreterStatus,
   Lexer,
+  ModuleRegistry,
   Parser,
+  Runtime,
   VisualizationProjector,
+  type Program,
   type RuntimeSnapshot,
 } from "./core";
 import { CodeEditor } from "./components/CodeEditor";
@@ -28,24 +34,14 @@ import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import "./App.css";
 
-const starterSource = `let numbers = [5, 2, 9, 1, 7, 3];
+const starterSource = `import { Stack } from "./modules/structures.js";
+
+let numbers = [5, 2, 9, 1, 7, 3];
 let total = 0;
 
 for (let index = 0; index < numbers.length; index++) {
   total += numbers[index];
   console.log("running total", total);
-}
-
-class Stack {
-  constructor() {
-    this.items = [];
-  }
-  push(value) {
-    this.items.push(value);
-  }
-  pop() {
-    return this.items.pop();
-  }
 }
 
 let stack = new Stack();
@@ -57,6 +53,29 @@ console.log("top", top, "total", total);`;
 const projector = new VisualizationProjector();
 const speedIntervals = [900, 650, 450, 280, 150];
 
+function parseProgram(source: string): Program {
+  return new Parser(new Lexer(source).tokenize()).parse();
+}
+
+function importsOf(program: Program): ImportDeclaration[] {
+  return program.statements.filter(
+    (statement): statement is ImportDeclaration =>
+      statement instanceof ImportDeclaration,
+  );
+}
+
+function moduleName(id: string): string {
+  try {
+    return new URL(id).pathname.split("/").pop() || id;
+  } catch {
+    return id;
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function App() {
   const [source, setSource] = useState(starterSource);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>();
@@ -64,22 +83,107 @@ function App() {
   const [stepCursor, setStepCursor] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(3);
+  const [moduleSources, setModuleSources] = useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
+  const [moduleError, setModuleError] = useState<string>();
+  const [moduleReload, setModuleReload] = useState(0);
+  const [loadingModules, setLoadingModules] = useState(false);
+  const attemptedModules = useRef<Set<string>>(new Set());
+  const moduleBaseUrl = useMemo(
+    () => new URL(".", window.location.href).href,
+    [],
+  );
+  const modules = useMemo(() => {
+    const registry = new ModuleRegistry(moduleBaseUrl);
+    moduleSources.forEach((moduleSource, id) =>
+      registry.setResolvedSource(id, moduleSource),
+    );
+    return registry;
+  }, [moduleBaseUrl, moduleSources]);
   const parsed = useMemo(() => {
     try {
       const tokens = new Lexer(source).tokenize();
+      const program = new Parser(tokens).parse();
       return {
         tokens,
-        interpreter: new Interpreter(new Parser(tokens).parse()),
+        program,
+        interpreter: new Interpreter(program, new Runtime(), modules),
         error: undefined,
       };
     } catch (error) {
       return {
         tokens: [],
+        program: undefined,
         interpreter: undefined,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       };
     }
-  }, [source]);
+  }, [source, modules]);
+  const imports = useMemo(
+    () => (parsed.program ? importsOf(parsed.program) : []),
+    [parsed.program],
+  );
+  const visibleModuleError =
+    imports.length > 0 ? moduleError : undefined;
+
+  useEffect(() => {
+    const program = parsed.program;
+    if (!program) return;
+
+    const missing = new Set<string>();
+    const scan = (candidate: Program, parentId?: string): void => {
+      for (const statement of importsOf(candidate)) {
+        let id: string;
+        try {
+          id = new URL(statement.source, parentId ?? moduleBaseUrl).href;
+        } catch {
+          setModuleError(`Invalid module path '${statement.source}'.`);
+          continue;
+        }
+        if (moduleSources.has(id) || attemptedModules.current.has(id)) continue;
+        missing.add(id);
+      }
+    };
+
+    scan(program);
+    for (const [id, moduleSource] of moduleSources) {
+      try {
+        scan(parseProgram(moduleSource), id);
+      } catch (error) {
+        setModuleError(
+          `Failed to parse module '${moduleName(id)}': ${errorMessage(error)}`,
+        );
+      }
+    }
+
+    if (missing.size === 0) {
+      setLoadingModules(false);
+      return;
+    }
+
+    setLoadingModules(true);
+    void (async () => {
+      const next = new Map(moduleSources);
+      for (const id of missing) {
+        attemptedModules.current.add(id);
+        try {
+          const response = await fetch(id);
+          if (!response.ok)
+            throw new Error(`HTTP ${response.status} ${response.statusText}`);
+          const moduleSource = await response.text();
+          parseProgram(moduleSource);
+          next.set(id, moduleSource);
+        } catch (error) {
+          setModuleError(
+            `Failed to load module '${moduleName(id)}': ${errorMessage(error)}`,
+          );
+        }
+      }
+      if (next.size !== moduleSources.size) setModuleSources(next);
+      setLoadingModules(false);
+    })();
+  }, [parsed.program, moduleSources, moduleBaseUrl, moduleReload]);
 
   const visualization = useMemo(
     () =>
@@ -93,7 +197,7 @@ function App() {
     selectedEvent?.type === ExecutionEventType.Error
       ? String(selectedEvent.payload?.message ?? "Runtime error")
       : undefined;
-  const error = parsed.error ?? snapshotError;
+  const error = parsed.error ?? visibleModuleError ?? snapshotError;
   const status = parsed.interpreter?.status ?? InterpreterStatus.Ready;
   const speedMs = speedIntervals[speed - 1] ?? 450;
   const lastStep = Math.max(0, steps.length - 1);
@@ -212,6 +316,14 @@ function App() {
     setSnapshot(nextSteps[0] ?? parsed.interpreter.runtime.snapshot());
   }
 
+  function reloadModules(): void {
+    attemptedModules.current = new Set();
+    setModuleError(undefined);
+    setLoadingModules(false);
+    setModuleSources(new Map());
+    setModuleReload((value) => value + 1);
+  }
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       const target = event.target as HTMLElement | null;
@@ -254,6 +366,28 @@ function App() {
             {playbackStatus}
           </span>
           <span>{parsed.tokens.length} tokens</span>
+          {imports.length > 0 ? (
+            <span className="flex items-center gap-2">
+              <FileCode2 className="h-3.5 w-3.5" />
+              {loadingModules
+                ? "loading modules"
+                : `${moduleSources.size} module${moduleSources.size === 1 ? "" : "s"}`}
+            </span>
+          ) : null}
+          {imports.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={reloadModules}
+              disabled={loadingModules}
+              aria-label="Reload imported modules"
+              title="Reload imported modules"
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${loadingModules ? "animate-spin" : ""}`}
+              />
+            </Button>
+          ) : null}
           <Button variant="ghost" size="icon" aria-label="Settings" title="Settings">
             <Settings2 className="h-4 w-4" />
           </Button>
@@ -262,7 +396,11 @@ function App() {
       <div className="mx-auto max-w-370 px-5 pb-10 lg:px-8">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-y border-white/8 py-3">
           <div className="flex items-center gap-1.5">
-            <Button variant="default" onClick={togglePlayback} disabled={!parsed.interpreter}>
+            <Button
+              variant="default"
+              onClick={togglePlayback}
+              disabled={!parsed.interpreter || loadingModules}
+            >
               {isPlaying ? <CirclePause className="h-4 w-4" /> : <CirclePlay className="h-4 w-4" />}
               {isPlaying ? "Pause" : "Play"}
             </Button>
@@ -282,6 +420,7 @@ function App() {
               onClick={stepForward}
               disabled={
                 !parsed.interpreter ||
+                loadingModules ||
                 (status !== InterpreterStatus.Ready && stepCursor >= lastStep)
               }
               aria-label="Next step"
@@ -289,7 +428,11 @@ function App() {
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
-            <Button variant="secondary" onClick={runToEnd} disabled={!parsed.interpreter}>
+            <Button
+              variant="secondary"
+              onClick={runToEnd}
+              disabled={!parsed.interpreter || loadingModules}
+            >
               <FastForward className="h-3.5 w-3.5" />
               Run to end
             </Button>
@@ -346,6 +489,7 @@ function App() {
             currentLocation={snapshot?.currentLocation}
             onChange={(value) => {
               setIsPlaying(false);
+              setModuleError(undefined);
               setSource(value);
             }}
           />

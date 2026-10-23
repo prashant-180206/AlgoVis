@@ -1,4 +1,4 @@
-import { ExecutionEventType } from "../execution/ExecutionEvent";
+import { ExecutionEvent, ExecutionEventType } from "../execution/ExecutionEvent";
 import {
   ArrayExpression,
   AssignmentStatement,
@@ -14,6 +14,7 @@ import {
   FunctionDeclaration,
   IdentifierExpression,
   IfStatement,
+  ImportDeclaration,
   IndexExpression,
   LiteralExpression,
   MemberExpression,
@@ -27,6 +28,9 @@ import {
   VariableDeclarationStatement,
   WhileStatement,
 } from "../language/Ast";
+import { Lexer } from "../language/Lexer";
+import { Parser } from "../language/Parser";
+import { ModuleRegistry } from "../modules/ModuleRegistry";
 import { Runtime, RuntimeSnapshot } from "../runtime/Runtime";
 import {
   ArrayValue,
@@ -56,6 +60,9 @@ export class Interpreter {
   private cursor = 0;
   private objectId = 0;
   private skipFirstRecordedStep = false;
+  private moduleDepth = 0;
+  private readonly moduleIdStack: string[] = [];
+  private readonly moduleCache = new Map<string, Scope>();
   public status = InterpreterStatus.Ready;
   public lastError?: Error;
   public readonly runtime: Runtime;
@@ -69,6 +76,7 @@ export class Interpreter {
   public constructor(
     private readonly program: Program,
     runtime = new Runtime(),
+    private readonly modules?: ModuleRegistry,
   ) {
     this.runtime = runtime;
     this.installBuiltins();
@@ -89,7 +97,7 @@ export class Interpreter {
     }
     const statement = this.program.statements[this.cursor];
     try {
-      this.runtime.emit({
+      this.emit({
         type: ExecutionEventType.Statement,
         location: statement.location,
         payload: { statementIndex: this.cursor },
@@ -101,7 +109,7 @@ export class Interpreter {
           ? InterpreterStatus.Finished
           : InterpreterStatus.Paused;
       if (this.status === InterpreterStatus.Finished) {
-        this.runtime.emit({
+        this.emit({
           type: ExecutionEventType.ProgramFinished,
           location: statement.location,
         });
@@ -111,7 +119,7 @@ export class Interpreter {
       this.lastError =
         error instanceof Error ? error : new Error(String(error));
       this.status = InterpreterStatus.Failed;
-      this.runtime.emit({
+      this.emit({
         type: ExecutionEventType.Error,
         location: statement.location,
         payload: { message: this.lastError.message },
@@ -138,6 +146,9 @@ export class Interpreter {
     this.cursor = 0;
     this.status = InterpreterStatus.Ready;
     this.lastError = undefined;
+    this.moduleDepth = 0;
+    this.moduleIdStack.length = 0;
+    this.moduleCache.clear();
     this.runtime.resetExecution();
     this.installBuiltins();
     this.runtime.captureSnapshot();
@@ -153,6 +164,7 @@ export class Interpreter {
   }
 
   private recordStep(statement: Statement): void {
+    if (this.moduleDepth > 0) return;
     if (statement instanceof BlockStatement) return;
     if (this.skipFirstRecordedStep) {
       this.skipFirstRecordedStep = false;
@@ -167,6 +179,10 @@ export class Interpreter {
 
   private execute(statement: Statement, scope: Scope): void {
     this.recordStep(statement);
+    if (statement instanceof ImportDeclaration) {
+      this.executeImport(statement, scope);
+      return;
+    }
     if (statement instanceof BlockStatement) {
       const blockScope = this.createScope(scope);
       this.runtime.enterBlockScope(blockScope);
@@ -297,6 +313,71 @@ export class Interpreter {
     );
   }
 
+  private executeImport(statement: ImportDeclaration, scope: Scope): void {
+    const moduleScope = this.loadModule(statement.source);
+
+    if (statement.namespace) {
+      scope.define(
+        statement.namespace,
+        new ObjectValue(new Map(moduleScope.entries())),
+      );
+    }
+
+    statement.specifiers.forEach((specifier) => {
+      if (!moduleScope.hasOwn(specifier.imported))
+        throw new Error(
+          `Module '${statement.source}' does not export '${specifier.imported}'.`,
+        );
+      scope.define(specifier.local, moduleScope.getOwn(specifier.imported)!);
+    });
+  }
+
+  private loadModule(specifier: string): Scope {
+    if (!this.modules)
+      throw new Error("Imports require a configured module registry.");
+
+    const parentId = this.moduleIdStack[this.moduleIdStack.length - 1];
+    const resolved = this.modules.resolve(specifier, parentId);
+    if (!resolved)
+      throw new Error(
+        parentId
+          ? `Cannot resolve module '${specifier}' from '${parentId}'.`
+          : `Cannot resolve module '${specifier}'.`,
+      );
+
+    const cached = this.moduleCache.get(resolved.id);
+    if (cached) return cached;
+
+    let program: Program;
+    try {
+      program = new Parser(new Lexer(resolved.source).tokenize()).parse();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to parse module '${resolved.id}': ${message}`);
+    }
+
+    const moduleScope = this.runtime.registerModuleScope(
+      new Scope(this.runtime.globals),
+    );
+    this.moduleCache.set(resolved.id, moduleScope);
+    this.moduleDepth += 1;
+    this.moduleIdStack.push(resolved.id);
+    try {
+      program.statements.forEach((statement) =>
+        this.execute(statement, moduleScope),
+      );
+    } finally {
+      this.moduleIdStack.pop();
+      this.moduleDepth -= 1;
+    }
+    return moduleScope;
+  }
+
+  private emit(event: ExecutionEvent): void {
+    if (this.moduleDepth > 0) return;
+    this.runtime.emit(event);
+  }
+
   private invoke(
     declaration: FunctionDeclaration,
     closure: Scope,
@@ -313,7 +394,7 @@ export class Interpreter {
       locals,
       callLocation: declaration.location,
     });
-    this.runtime.emit({
+    this.emit({
       type: ExecutionEventType.Call,
       location: declaration.location,
       payload: { name: declaration.name, environmentId: locals.id },
@@ -333,7 +414,7 @@ export class Interpreter {
     } finally {
       this.runtime.leaveFrame();
       if (completed) {
-        this.runtime.emit({
+        this.emit({
           type: ExecutionEventType.Return,
           location: declaration.location,
           payload: { name: declaration.name, value: result },
@@ -356,7 +437,7 @@ export class Interpreter {
       return new PrimitiveValue(expression.value);
     if (expression instanceof IdentifierExpression) {
       const value = scope.get(expression.name);
-      this.runtime.emit({
+      this.emit({
         type: ExecutionEventType.Read,
         location: expression.location,
         payload: { name: expression.name, value },
@@ -451,7 +532,7 @@ export class Interpreter {
     const right = this.evaluate(expression.right, scope);
     const leftValue = this.primitive(left);
     const rightValue = this.primitive(right);
-    this.runtime.emit({
+    this.emit({
       type: ExecutionEventType.Compare,
       location: expression.location,
       payload: {
@@ -632,7 +713,7 @@ export class Interpreter {
               [],
               this.program.location,
               (...args) => {
-                this.runtime.emit({
+                this.emit({
                   type: ExecutionEventType.Write,
                   location: this.program.location,
                   payload: {
@@ -681,7 +762,7 @@ export class Interpreter {
     name: string,
     value: RuntimeValue,
   ): void {
-    this.runtime.emit({
+    this.emit({
       type: ExecutionEventType.Write,
       location: statement.location,
       payload: { name, value },

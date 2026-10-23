@@ -152,9 +152,11 @@ export class Runtime {
         kind:
           scope.id === this.globals.id
             ? "global"
-            : frameScopeIds.has(scope.id)
-              ? "function"
-              : "block",
+            : this.moduleScopeIds.has(scope.id)
+              ? "module"
+              : frameScopeIds.has(scope.id)
+                ? "function"
+                : "block",
         variables: entries.map(([name, value]) =>
           this.describeVariable(scope, name, value, valueCopies),
         ),
@@ -279,7 +281,7 @@ export interface VariableSnapshot {
 export interface EnvironmentSnapshot {
   readonly id: string;
   readonly parentId?: string;
-  readonly kind: "global" | "function" | "block";
+  readonly kind: "global" | "module" | "function" | "block";
   readonly active: boolean;
   readonly variables: readonly VariableSnapshot[];
 }

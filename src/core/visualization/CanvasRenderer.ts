@@ -4,7 +4,6 @@ import {
   VisualInstance,
   VisualObject,
   VisualObjectNode,
-  VisualStack,
   VisualizationState,
 } from "./VisualizationState";
 
@@ -135,8 +134,6 @@ export class CanvasRenderer {
   ): void {
     if (object.type === "array")
       this.drawArray(context, object, x, y, width, height);
-    else if (object.type === "stack")
-      this.drawStack(context, object, x, y, width, height);
     else if (object.type === "instance")
       this.drawInstance(context, object, x, y, width, height);
     else this.drawObjectFields(context, object, x, y, width, height);
@@ -181,42 +178,6 @@ export class CanvasRenderer {
       context.fillText(`[${index}]`, tileX + tileWidth / 2, y + 120);
       context.textAlign = "left";
     });
-  }
-
-  private drawStack(
-    context: CanvasRenderingContext2D,
-    object: VisualStack,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-  ): void {
-    this.drawLabel(context, `${object.label.toUpperCase()} / STACK`, x, y);
-    const tileWidth = Math.min(150, width * 0.4);
-    const tileHeight = Math.min(
-      42,
-      Math.max(28, (height - 28) / Math.max(1, object.values.length)),
-    );
-    const startX = x + (width - tileWidth) / 2;
-    [...object.values].reverse().forEach((value, index) => {
-      const tileY = y + 18 + index * tileHeight;
-      context.fillStyle = index === 0 ? "#d7f56b" : "#253229";
-      context.strokeStyle = index === 0 ? "#eaff9b" : "#526456";
-      context.fillRect(startX, tileY, tileWidth, tileHeight - 5);
-      context.strokeRect(startX, tileY, tileWidth, tileHeight - 5);
-      context.fillStyle = index === 0 ? "#172014" : "#e1e9df";
-      context.textAlign = "center";
-      context.font = "600 15px 'IBM Plex Mono', monospace";
-      context.fillText(
-        value,
-        startX + tileWidth / 2,
-        tileY + tileHeight / 2 + 5,
-      );
-      context.textAlign = "left";
-    });
-    context.fillStyle = "#7d8e80";
-    context.font = "10px 'IBM Plex Mono', monospace";
-    context.fillText("TOP", startX + tileWidth + 10, y + 32);
   }
 
   private drawInstance(
