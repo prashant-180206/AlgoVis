@@ -66,8 +66,9 @@ function nestedArray(
   const found = context.objects.find(
     (object) =>
       object.type === "array" &&
-      labels.some((label) =>
-        object.label === label || object.label.startsWith(`${label}.`),
+      labels.some(
+        (label) =>
+          object.label === label || object.label.startsWith(`${label}.`),
       ),
   );
   return found && found.type === "array" ? { values: found.values } : undefined;
@@ -95,11 +96,16 @@ function drawPanel(
     .fill(C.panel)
     .stroke({ width: 1, color: C.panelStroke });
   context.container.addChild(panel);
-  context.addText(`${instance.label.toUpperCase()} · ${title}`, x + 12, y + 10, {
-    size: 10,
-    color: C.title,
-    bold: true,
-  });
+  context.addText(
+    `${instance.label.toUpperCase()} · ${title}`,
+    x + 12,
+    y + 10,
+    {
+      size: 10,
+      color: C.title,
+      bold: true,
+    },
+  );
   context.addText(subtitle, x + 12, y + 25, { size: 9, color: C.muted });
   return {
     innerX: x + 12,
@@ -118,7 +124,10 @@ function fieldLines(
   limit = 6,
 ): void {
   if (instance.fields.length === 0) {
-    context.addText("no fields", innerX, innerY + 4, { size: 11, color: C.muted });
+    context.addText("no fields", innerX, innerY + 4, {
+      size: 11,
+      color: C.muted,
+    });
     return;
   }
   instance.fields.slice(0, limit).forEach((field, index) => {
@@ -274,15 +283,27 @@ const renderStack: SpecialPixiInstanceRenderer = (
     return;
   }
   if (array.values.length === 0) {
-    context.addText("empty stack", innerX, innerY + 8, { size: 11, color: C.muted });
+    context.addText("empty stack", innerX, innerY + 8, {
+      size: 11,
+      color: C.muted,
+    });
     return;
   }
   const tileHeight = 24;
-  const maxTiles = Math.max(1, Math.floor((innerHeight - 6) / (tileHeight + 5)));
+  const maxTiles = Math.max(
+    1,
+    Math.floor((innerHeight - 6) / (tileHeight + 5)),
+  );
   const hidden = Math.max(0, array.values.length - maxTiles);
   const visible = array.values.slice(-maxTiles);
   if (hidden > 0)
-    drawMarker(context, `… ${hidden} more below`, innerX + innerWidth / 2, innerY, C.faint);
+    drawMarker(
+      context,
+      `… ${hidden} more below`,
+      innerX + innerWidth / 2,
+      innerY,
+      C.faint,
+    );
   const columnWidth = Math.min(120, Math.max(46, innerWidth * 0.45));
   const startRow = hidden > 0 ? 16 : 0;
   visible
@@ -302,7 +323,13 @@ const renderStack: SpecialPixiInstanceRenderer = (
         isTop ? C.title : C.faint,
       );
       if (isTop)
-        drawMarker(context, "TOP", innerX + innerWidth - 20, tileY + 6, C.title);
+        drawMarker(
+          context,
+          "TOP",
+          innerX + innerWidth - 20,
+          tileY + 6,
+          C.title,
+        );
     });
 };
 
@@ -331,7 +358,10 @@ function renderQueue(
     return;
   }
   if (array.values.length === 0) {
-    context.addText("empty queue", innerX, innerY + 8, { size: 11, color: C.muted });
+    context.addText("empty queue", innerX, innerY + 8, {
+      size: 11,
+      color: C.muted,
+    });
     return;
   }
   const frontIndex = Number(
@@ -358,7 +388,13 @@ function renderQueue(
     const tileX = startX + index * (tileWidth + gap);
     drawTile(context, value, tileX, tileY, tileWidth, tileHeight, isFront);
     if (isFront)
-      drawMarker(context, "FRONT", tileX + tileWidth / 2, tileY + tileHeight + 5, C.title);
+      drawMarker(
+        context,
+        "FRONT",
+        tileX + tileWidth / 2,
+        tileY + tileHeight + 5,
+        C.title,
+      );
     else if (index === visible.length - 1)
       drawMarker(
         context,
@@ -376,7 +412,7 @@ function renderQueue(
         C.faint,
       );
   });
-};
+}
 
 /* ------------------------------------------------------------------ */
 /* Linked lists and nodes                                              */
@@ -443,7 +479,10 @@ function renderList(
     16,
   );
   if (chain.length === 0) {
-    context.addText("empty list", innerX, innerY + 10, { size: 11, color: C.muted });
+    context.addText("empty list", innerX, innerY + 10, {
+      size: 11,
+      color: C.muted,
+    });
     fieldLines(
       context,
       object,
@@ -460,7 +499,10 @@ function renderList(
   const showMore = chain.length > count;
   const nodeWidth = Math.max(
     40,
-    Math.min(70, Math.floor((innerWidth - gap * (count - 1) - tailBadge) / count)),
+    Math.min(
+      70,
+      Math.floor((innerWidth - gap * (count - 1) - tailBadge) / count),
+    ),
   );
   const nodeHeight = 40;
   const rowY = innerY + 14;
@@ -472,7 +514,15 @@ function renderList(
     const nodeX = innerX + index * (nodeWidth + gap);
     const valueField = fieldOf(node, VALUE_FIELDS);
     if (valueField)
-      drawTile(context, valueField.value, nodeX, rowY, nodeWidth, nodeHeight, index === 0);
+      drawTile(
+        context,
+        valueField.value,
+        nodeX,
+        rowY,
+        nodeWidth,
+        nodeHeight,
+        index === 0,
+      );
     if (index < count - 1)
       drawArrow(
         context,
@@ -491,10 +541,15 @@ function renderList(
   });
   const lastX = innerX + (count - 1) * (nodeWidth + gap);
   if (showMore) {
-    context.addText(`… ${chain.length - count} more`, lastX + nodeWidth + 2, rowY + 15, {
-      size: 9,
-      color: C.faint,
-    });
+    context.addText(
+      `… ${chain.length - count} more`,
+      lastX + nodeWidth + 2,
+      rowY + 15,
+      {
+        size: 9,
+        color: C.faint,
+      },
+    );
   } else {
     drawMarker(context, "TAIL", lastX + nodeWidth / 2, rowY - 8, C.title);
   }
@@ -507,7 +562,7 @@ function renderList(
       rowY + nodeHeight + 18,
       C.muted,
     );
-};
+}
 
 const renderNode: SpecialPixiInstanceRenderer = (
   context,
@@ -534,12 +589,30 @@ const renderNode: SpecialPixiInstanceRenderer = (
     drawCircleValue(context, valueField.value, centerX, centerY, 18, true);
   else fieldLines(context, object, innerX, innerY, innerWidth);
   if (fieldOf(object, NEXT_FIELDS)) {
-    drawArrow(context, centerX + 22, centerY, innerX + innerWidth - 22, centerY);
-    drawMarker(context, "next", centerX + innerWidth / 2 - 12, centerY - 18, C.title);
+    drawArrow(
+      context,
+      centerX + 22,
+      centerY,
+      innerX + innerWidth - 22,
+      centerY,
+    );
+    drawMarker(
+      context,
+      "next",
+      centerX + innerWidth / 2 - 12,
+      centerY - 18,
+      C.title,
+    );
   }
   if (fieldOf(object, PREV_FIELDS)) {
     drawArrow(context, centerX - 22, centerY + 0, innerX + 22, centerY);
-    drawMarker(context, "prev", innerX + innerWidth / 2 - 12, centerY - 18, C.muted);
+    drawMarker(
+      context,
+      "prev",
+      innerX + innerWidth / 2 - 12,
+      centerY - 18,
+      C.muted,
+    );
   }
 };
 
@@ -657,9 +730,22 @@ const renderTree: SpecialPixiInstanceRenderer = (
   });
   nodes.forEach((node) => {
     const center = centerOf(node);
-    drawCircleValue(context, node.value, center.x, center.y, radius, node.depth === 0);
+    drawCircleValue(
+      context,
+      node.value,
+      center.x,
+      center.y,
+      radius,
+      node.depth === 0,
+    );
     if (node.priority !== undefined)
-      drawMarker(context, `p${node.priority}`, center.x, center.y + radius + 6, C.muted);
+      drawMarker(
+        context,
+        `p${node.priority}`,
+        center.x,
+        center.y + radius + 6,
+        C.muted,
+      );
   });
 };
 
@@ -690,13 +776,25 @@ const renderTreeNode: SpecialPixiInstanceRenderer = (
   const childY = Math.min(innerY + innerHeight - 8, centerY + 40);
   const span = Math.max(44, innerWidth / 2.6);
   if (fieldOf(object, ["left", "prev", "previous"])) {
-    drawArrow(context, centerX - 10, centerY + 14, centerX - span / 2, childY - 14);
+    drawArrow(
+      context,
+      centerX - 10,
+      centerY + 14,
+      centerX - span / 2,
+      childY - 14,
+    );
   } else {
     drawMarker(context, "left: null", centerX - span / 2, childY - 8, C.faint);
   }
   drawMarker(context, "left", centerX - span / 2 - 12, centerY - 8, C.muted);
   if (fieldOf(object, ["right", "next"])) {
-    drawArrow(context, centerX + 10, centerY + 14, centerX + span / 2, childY - 14);
+    drawArrow(
+      context,
+      centerX + 10,
+      centerY + 14,
+      centerX + span / 2,
+      childY - 14,
+    );
   } else {
     drawMarker(context, "right: null", centerX + span / 2, childY - 8, C.faint);
   }
@@ -739,7 +837,10 @@ function renderHeap(
   }
   const values = array.values.slice(0, 15);
   const levels = Math.floor(Math.log2(values.length)) + 1;
-  const levelGap = Math.min(34, Math.max(22, (innerHeight * 0.66) / Math.max(1, levels)));
+  const levelGap = Math.min(
+    34,
+    Math.max(22, (innerHeight * 0.66) / Math.max(1, levels)),
+  );
   const topY = innerY + 8;
   const centerX = innerX + innerWidth / 2;
   const radius = 12;
@@ -757,7 +858,8 @@ function renderHeap(
     const parent = positions[Math.floor((index - 1) / 2)];
     const depth = Math.floor(Math.log2(index + 1));
     const direction = index % 2 === 1 ? -1 : 1;
-    const spread = (innerWidth / Math.max(2.4, levels + 1.6)) * (levels * 0.42 + 0.5);
+    const spread =
+      (innerWidth / Math.max(2.4, levels + 1.6)) * (levels * 0.42 + 0.5);
     positions.push({
       cx: parent.cx + direction * Math.max(30, spread / depth),
       cy: topY + depth * (levelGap + 8),
@@ -766,7 +868,14 @@ function renderHeap(
   });
   positions.forEach((position, index) => {
     if (index === 0) {
-      drawCircleValue(context, position.value, position.cx, position.cy, radius, true);
+      drawCircleValue(
+        context,
+        position.value,
+        position.cx,
+        position.cy,
+        radius,
+        true,
+      );
       drawMarker(
         context,
         variant === "max" ? "MAX" : "MIN",
@@ -777,16 +886,34 @@ function renderHeap(
       return;
     }
     const parent = positions[Math.floor((index - 1) / 2)];
-    drawArrow(context, parent.cx, parent.cy + radius, position.cx, position.cy - radius);
-    drawCircleValue(context, position.value, position.cx, position.cy, radius, false);
+    drawArrow(
+      context,
+      parent.cx,
+      parent.cy + radius,
+      position.cx,
+      position.cy - radius,
+    );
+    drawCircleValue(
+      context,
+      position.value,
+      position.cx,
+      position.cy,
+      radius,
+      false,
+    );
   });
   const remaining = array.values.length - values.length;
   if (remaining > 0)
-    context.addText(`+${remaining} more not shown`, innerX, innerY + innerHeight - 12, {
-      size: 9,
-      color: C.faint,
-    });
-};
+    context.addText(
+      `+${remaining} more not shown`,
+      innerX,
+      innerY + innerHeight - 12,
+      {
+        size: 9,
+        color: C.faint,
+      },
+    );
+}
 
 /* ------------------------------------------------------------------ */
 /* Graph                                                               */
@@ -802,10 +929,7 @@ const GRAPH_MAX_VERTICES = 12;
 function graphNeighbor(entry: string): string {
   const trimmed = entry.trim();
   if (trimmed.startsWith("[") && trimmed.includes(",")) {
-    return trimmed
-      .replace(/^\[/, "")
-      .split(",")[0]
-      .trim();
+    return trimmed.replace(/^\[/, "").split(",")[0].trim();
   }
   return trimmed;
 }
@@ -835,11 +959,13 @@ const renderGraph: SpecialPixiInstanceRenderer = (
   const adjacency = context.objects.find(
     (candidate) =>
       candidate.type === "object" &&
-      candidates.some(
-        (name) => candidate.label === `${object.label}.${name}`,
-      ),
+      candidates.some((name) => candidate.label === `${object.label}.${name}`),
   );
-  if (!adjacency || adjacency.type !== "object" || adjacency.fields.length === 0) {
+  if (
+    !adjacency ||
+    adjacency.type !== "object" ||
+    adjacency.fields.length === 0
+  ) {
     fieldLines(context, object, innerX, innerY, innerWidth);
     return;
   }
@@ -855,12 +981,19 @@ const renderGraph: SpecialPixiInstanceRenderer = (
     const values =
       nested && nested.type === "array"
         ? nested.values
-        : field.value.replace(/^\[|\]$/g, "").split(",").map((entry) => entry.trim());
+        : field.value
+            .replace(/^\[|\]$/g, "")
+            .split(",")
+            .map((entry) => entry.trim());
     links.set(field.name, values);
     vertexes.push(field.name);
     values.forEach((entry) => {
       const neighbor = graphNeighbor(entry);
-      if (neighbor && !vertexes.includes(neighbor) && vertexes.length < GRAPH_MAX_VERTICES * 3)
+      if (
+        neighbor &&
+        !vertexes.includes(neighbor) &&
+        vertexes.length < GRAPH_MAX_VERTICES * 3
+      )
         vertexes.push(neighbor);
     });
   });
@@ -954,9 +1087,7 @@ const renderMatrix: SpecialPixiInstanceRenderer = (
     height,
   );
   const dataField = fieldOf(object, ARRAY_FIELDS);
-  const dataLabel = dataField
-    ? `${object.label}.${dataField.name}`
-    : undefined;
+  const dataLabel = dataField ? `${object.label}.${dataField.name}` : undefined;
   const rowNodes = context.objects
     .filter(
       (candidate) =>
@@ -966,10 +1097,10 @@ const renderMatrix: SpecialPixiInstanceRenderer = (
     )
     .map((candidate) => {
       if (candidate.type !== "array") return undefined;
-      const index = Number(
-        candidate.label.slice((dataLabel ?? "").length + 1),
-      );
-      return Number.isFinite(index) ? { index, values: candidate.values } : undefined;
+      const index = Number(candidate.label.slice((dataLabel ?? "").length + 1));
+      return Number.isFinite(index)
+        ? { index, values: candidate.values }
+        : undefined;
     })
     .filter((row): row is { index: number; values: readonly string[] } =>
       Boolean(row),
@@ -1002,8 +1133,10 @@ const renderMatrix: SpecialPixiInstanceRenderer = (
     26,
     Math.min(
       64,
-      Math.floor((innerWidth - gap * Math.max(1, columnCount - 1) - rowMarkers) /
-        columnCount),
+      Math.floor(
+        (innerWidth - gap * Math.max(1, columnCount - 1) - rowMarkers) /
+          columnCount,
+      ),
     ),
   );
   const cellHeight = Math.max(
@@ -1016,8 +1149,7 @@ const renderMatrix: SpecialPixiInstanceRenderer = (
   const gridWidth = columnCount * cellWidth + (columnCount - 1) * gap;
   const gridHeight = rowCount * cellHeight + (rowCount - 1) * gap;
   const startX =
-    innerX +
-    Math.max(rowMarkers, Math.floor((innerWidth - gridWidth) / 2));
+    innerX + Math.max(rowMarkers, Math.floor((innerWidth - gridWidth) / 2));
   const startY = innerY + Math.floor((innerHeight - gridHeight) / 2);
   for (let row = 0; row < rowCount; row++) {
     const tileY = startY + row * (cellHeight + gap);
@@ -1043,10 +1175,15 @@ const renderMatrix: SpecialPixiInstanceRenderer = (
     }
   }
   if (rows.length > rowCount)
-    context.addText(`… ${rows.length - rowCount} more rows`, innerX, y + height - 14, {
-      size: 9,
-      color: C.faint,
-    });
+    context.addText(
+      `… ${rows.length - rowCount} more rows`,
+      innerX,
+      y + height - 14,
+      {
+        size: 9,
+        color: C.faint,
+      },
+    );
 };
 
 /* ------------------------------------------------------------------ */
@@ -1064,7 +1201,12 @@ const TREE_CLASS_NAMES = [
   "searchtree",
   "avltree",
 ] as const;
-const HEAP_CLASS_NAMES = ["heap", "minheap", "maxheap", "priorityqueue"] as const;
+const HEAP_CLASS_NAMES = [
+  "heap",
+  "minheap",
+  "maxheap",
+  "priorityqueue",
+] as const;
 const LIST_CLASS_NAMES = [
   "list",
   "linkedlist",
@@ -1111,7 +1253,9 @@ export function classCardHeight(
   if (NODE_CLASS_NAMES.includes(key as (typeof NODE_CLASS_NAMES)[number]))
     return 124;
   if (
-    TREE_NODE_CLASS_NAMES.includes(key as (typeof TREE_NODE_CLASS_NAMES)[number])
+    TREE_NODE_CLASS_NAMES.includes(
+      key as (typeof TREE_NODE_CLASS_NAMES)[number],
+    )
   )
     return 170;
   if (TREE_CLASS_NAMES.includes(key as (typeof TREE_CLASS_NAMES)[number]))

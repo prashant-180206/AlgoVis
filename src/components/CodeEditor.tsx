@@ -28,6 +28,10 @@ export function CodeEditor({
   const editorRef = useRef<EditorInstance | undefined>(undefined);
   const monacoRef = useRef<MonacoInstance | undefined>(undefined);
   const decorationsRef = useRef<string[]>([]);
+  // Tracks the last auto-revealed execution line so re-applying decorations
+  // for the same line (which happens on every keystroke while editing) does
+  // not drag the viewport away from where the user is typing.
+  const revealedLineRef = useRef<number | undefined>(undefined);
   const currentLine = currentLocation?.start.line;
   const currentLineSource =
     currentLine === undefined ? undefined : source.split("\n")[currentLine - 1]?.trim();
@@ -52,6 +56,7 @@ export function CodeEditor({
         decorationsRef.current,
         [],
       );
+      revealedLineRef.current = undefined;
       return;
     }
     const startLine = currentLocation.start.line;
@@ -71,7 +76,12 @@ export function CodeEditor({
         },
       },
     ]);
-    editor.revealLineInCenterIfOutsideViewport(startLine);
+    // Reveal only when the execution line actually moved. Editing text
+    // re-runs this effect with the same highlighted line; re-revealing then
+    // would yank the viewport back while the user is typing.
+    if (revealedLineRef.current === startLine) return;
+    revealedLineRef.current = startLine;
+    // editor.revealLineInCenterIfOutsideViewport(startLine);
   }, [currentLocation, source]);
 
   return (

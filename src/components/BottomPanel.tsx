@@ -57,7 +57,8 @@ export function BottomPanel({
                 ) : (
                   <AlertTriangle className="h-3.5 w-3.5" />
                 )}
-                {item.label}
+                <div className="text-[10px]">{item.label}</div>
+                
                 {item.count ? (
                   <span className="rounded bg-white/6 px-1 font-mono text-[9px] text-zinc-500">
                     {item.count}
@@ -88,7 +89,7 @@ export function BottomPanel({
         ) : (
           <div className="space-y-3 p-1">
             {error ? (
-              <div className="rounded border border-red-400/20 bg-red-400/[0.05] p-3">
+              <div className="rounded border border-red-400/20 bg-red-400/5 p-3">
                 <p className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-red-300">
                   <AlertTriangle className="h-3.5 w-3.5" /> Interpreter problem
                 </p>

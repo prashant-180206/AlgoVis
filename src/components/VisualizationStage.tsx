@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, Maximize2, ScanLine } from "lucide-react";
+import {
+  Activity,
+  Maximize2,
+  ScanLine,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import {
   defaultClassRenderers,
   PixiRenderer,
@@ -86,11 +92,29 @@ export function VisualizationStage({
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => rendererRef.current?.zoom(-1)}
+            aria-label="Zoom out visualization"
+            title="Zoom out"
+          >
+            <ZoomOut className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => rendererRef.current?.resetView()}
             aria-label="Fit visualization"
             title="Fit visualization"
           >
             <ScanLine className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => rendererRef.current?.zoom(1)}
+            aria-label="Zoom in visualization"
+            title="Zoom in (Ctrl+wheel / pinch also zooms)"
+          >
+            <ZoomIn className="h-4 w-4" />
           </Button>
           <Button
             variant="ghost"
@@ -115,7 +139,9 @@ export function VisualizationStage({
       
       </div>
       <div className="flex shrink-0 items-center justify-between border-t border-white/8 px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-zinc-600">
-        <span>Environment projection</span>
+        <span>
+          Environment projection · drag to pan · ctrl+wheel to zoom
+        </span>
         <span className="font-mono text-zinc-500">
           STEP {stepCount === 0 ? 0 : stepIndex} /{" "}
           {Math.max(0, stepCount - 1)}

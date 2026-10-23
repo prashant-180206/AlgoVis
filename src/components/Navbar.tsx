@@ -1,4 +1,4 @@
-import { FolderOpen, RefreshCw, Save } from "lucide-react";
+import { FolderOpen, RefreshCw,  } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
@@ -24,11 +24,7 @@ export function Navbar({
   isPlaying,
   hasImports,
   loadingModules,
-  canSave,
-  workspaceLoading,
   onReloadModules,
-  onOpenFolder,
-  onSaveFile,
 }: NavbarProps) {
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-white/8 bg-[#0e110e] px-3">
@@ -84,14 +80,6 @@ export function Navbar({
             />
           </Button>
         ) : null}
-        <Button size="sm" onClick={onOpenFolder} disabled={workspaceLoading}>
-          <FolderOpen className="h-3.5 w-3.5" />
-          Open folder
-        </Button>
-        <Button size="sm" onClick={onSaveFile} disabled={!canSave} title="Save file (Ctrl+S)">
-          <Save className="h-3.5 w-3.5" />
-          Save
-        </Button>
       </div>
     </header>
   );

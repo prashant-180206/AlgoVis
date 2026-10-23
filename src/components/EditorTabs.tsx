@@ -35,7 +35,7 @@ export function EditorTabs({
           return (
             <button
               className={cn(
-                "group relative flex min-w-32 max-w-56 items-center gap-2 border-r border-white/6 px-3 text-left text-[11px] text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-200",
+                "group relative flex min-w-32 max-w-56 items-center gap-2 border-r border-white/6 px-3 text-left text-[11px] text-zinc-500 transition-colors hover:bg-white/4 hover:text-zinc-200",
                 active &&
                   "bg-[#151a15] text-zinc-200 after:absolute after:inset-x-0 after:top-0 after:h-px after:bg-lime-300",
               )}
@@ -44,8 +44,8 @@ export function EditorTabs({
               title={path}
               type="button"
             >
-              <FileCode2 className="h-3.5 w-3.5 shrink-0 text-amber-300/80" />
-              <span className="min-w-0 flex-1 truncate">{fileName(path)}</span>
+              <FileCode2 className="h-3.5 w-3.5 shrink-0  text-amber-300/80" />
+              <span className="min-w-0 flex-1 text-[12px] truncate">{fileName(path)}</span>
               {dirty ? (
                 <i className="h-1.5 w-1.5 shrink-0 rounded-full bg-lime-300" />
               ) : null}

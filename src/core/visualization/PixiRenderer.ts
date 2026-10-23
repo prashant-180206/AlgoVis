@@ -165,6 +165,40 @@ export class PixiRenderer {
     this.world.y += deltaY;
   }
 
+  /** Toolbar zoom step in (+1) or out (-1), centered on the visible canvas. */
+  public zoom(step: 1 | -1): void {
+    const canvas = this.app?.canvas;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    this.zoomAt(
+      step > 0 ? 1.2 : 1 / 1.2,
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+  }
+
+  /**
+   * Zoom so the canvas point under (clientX, clientY) stays put while the
+   * world scales — zoom towards the cursor. Scale is clamped so content
+   * can neither vanish nor blow past readable sizes.
+   */
+  private zoomAt(factor: number, clientX: number, clientY: number): void {
+    const canvas = this.app?.canvas;
+    if (!canvas) return;
+    const current = this.world.scale.x;
+    const scale = Math.min(4, Math.max(0.15, current * factor));
+    if (scale === current) return;
+    this.viewTouched = true;
+    const rect = canvas.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    const worldX = (localX - this.world.x) / current;
+    const worldY = (localY - this.world.y) / current;
+    this.world.scale.set(scale);
+    this.world.x = localX - worldX * scale;
+    this.world.y = localY - worldY * scale;
+  }
+
   public resetView(): void {
     this.viewTouched = false;
     this.fitToView();
@@ -254,19 +288,15 @@ export class PixiRenderer {
           !absorbed.some((prefix) => object.label.startsWith(prefix)),
       );
       // Cards wrap into rows instead of stretching into oversized
-      // rectangles on wide canvases.
+      // rectangles on wide canvases. Flex rule: once the laid-out stack of
+      // rows becomes taller than two canvas widths (height/width > 2), the
+      // packing relaxes the 470px card cap and reflows into extra columns
+      // so the stage stays compact instead of turning into a tall sliver.
       const cardGap = 16;
       const rowGap = 18;
       const available = width - 48;
       const maxCardWidth = 470;
-      const columns = Math.max(
-        1,
-        Math.floor((available + cardGap) / (maxCardWidth + cardGap)),
-      );
-      const cardWidth = Math.min(
-        maxCardWidth,
-        Math.floor((available - (columns - 1) * cardGap) / columns),
-      );
+      const minCardWidth = 220;
       const heightOf = (object: (typeof drawable)[number]): number =>
         object.type === "array"
           ? 92
@@ -276,23 +306,69 @@ export class PixiRenderer {
                 Math.min(300, 46 + object.fields.length * 22),
               )
             : classCardHeight(object, this.state?.objects ?? []);
+
+      const pack = (columns: number) => {
+        const cardWidth = Math.floor(
+          (available - (columns - 1) * cardGap) / columns,
+        );
+        const rows = Array.from(
+          { length: Math.ceil(drawable.length / columns) },
+          (_, rowIndex) =>
+            drawable.slice(
+              rowIndex * columns,
+              rowIndex * columns + columns,
+            ),
+        );
+        const height = Math.max(
+          0,
+          rows.reduce(
+            (total, row) =>
+              total + Math.max(...row.map(heightOf), 0) + rowGap,
+            -rowGap,
+          ),
+        );
+        return { rows, cardWidth, height };
+      };
+
+      const widthBasedColumns = Math.max(
+        1,
+        Math.floor((available + cardGap) / (maxCardWidth + cardGap)),
+      );
+      const maxColumns = Math.min(
+        drawable.length,
+        Math.max(
+          1,
+          Math.floor((available + cardGap) / (minCardWidth + cardGap)),
+        ),
+      );
+      let layout = pack(Math.min(drawable.length, widthBasedColumns));
+      const aspectLimit = 2 * width;
+      if (layout.height > aspectLimit) {
+        for (let columns = widthBasedColumns + 1; columns <= maxColumns; columns += 1) {
+          const candidate = pack(columns);
+          if (candidate.height >= layout.height) continue;
+          layout = candidate;
+          if (layout.height <= aspectLimit) break;
+        }
+      }
+
       let yCursor = y;
-      for (let offset = 0; offset < drawable.length; offset += columns) {
-        const row = drawable.slice(offset, offset + columns);
-        const rowHeight = Math.max(...row.map(heightOf));
-        const rowWidth = row.length * cardWidth + (row.length - 1) * cardGap;
+      layout.rows.forEach((row) => {
+        const rowHeight = Math.max(...row.map(heightOf), 0);
+        const rowWidth =
+          row.length * layout.cardWidth + (row.length - 1) * cardGap;
         const startX = 24 + Math.max(0, (available - rowWidth) / 2);
         row.forEach((object, index) => {
           this.drawObject(
             object,
-            startX + Math.round(index * (cardWidth + cardGap)),
+            startX + Math.round(index * (layout.cardWidth + cardGap)),
             yCursor,
-            cardWidth,
+            layout.cardWidth,
             rowHeight,
           );
         });
         yCursor += rowHeight + rowGap;
-      }
+      });
       y = yCursor;
     }
     if (forest.length === 0 && this.state.objects.length === 0) {
@@ -654,6 +730,17 @@ export class PixiRenderer {
     };
     const wheel = (event: WheelEvent): void => {
       event.preventDefault();
+      // Ctrl/Cmd + wheel (or a trackpad pinch, which reports ctrlKey) zooms
+      // towards the pointer; plain wheel scrolls, Shift+wheel scrolls on X
+      // the way a mouse wheel has no horizontal delta of its own.
+      if (event.ctrlKey || event.metaKey) {
+        this.zoomAt(Math.exp(-event.deltaY * 0.0016), event.clientX, event.clientY);
+        return;
+      }
+      if (event.shiftKey && !event.deltaX) {
+        this.panBy(-event.deltaY, 0);
+        return;
+      }
       this.panBy(-event.deltaX, -event.deltaY);
     };
     canvas.addEventListener("pointerdown", down);
