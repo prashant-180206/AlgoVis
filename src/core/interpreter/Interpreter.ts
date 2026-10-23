@@ -81,6 +81,11 @@ export class Interpreter {
     private readonly program: Program,
     runtime = new Runtime(),
     private readonly modules?: ModuleRegistry,
+    /**
+     * Module id of the entry program. Import specifiers in the entry file are
+     * resolved relative to this id (for example a workspace:// path).
+     */
+    private readonly entryModuleId?: string,
   ) {
     this.runtime = runtime;
     this.installBuiltins();
@@ -342,7 +347,8 @@ export class Interpreter {
     if (!this.modules)
       throw new Error("Imports require a configured module registry.");
 
-    const parentId = this.moduleIdStack[this.moduleIdStack.length - 1];
+    const parentId =
+      this.moduleIdStack[this.moduleIdStack.length - 1] ?? this.entryModuleId;
     const resolved = this.modules.resolve(specifier, parentId);
     if (!resolved)
       throw new Error(
@@ -439,7 +445,10 @@ export class Interpreter {
     args: readonly RuntimeValue[],
     receiver?: InstanceValue,
   ): RuntimeValue {
-    const locals = this.createScope(closure);
+    // Bindings resolve through the lexical closure, but the environment tree
+    // should mirror the call stack: the callee is nested inside its caller.
+    const caller = this.runtime.callStack[this.runtime.callStack.length - 1];
+    const locals = this.createScope(closure, caller?.locals ?? closure);
     if (receiver) locals.define("this", receiver);
     declaration.parameters.forEach((parameter, index) =>
       this.bindPattern(
@@ -827,8 +836,8 @@ export class Interpreter {
       payload: { name, value },
     });
   }
-  private createScope(parent: Scope): Scope {
-    return this.runtime.registerScope(new Scope(parent));
+  private createScope(parent: Scope, environmentParent?: Scope): Scope {
+    return this.runtime.registerScope(new Scope(parent, environmentParent));
   }
   private primitive(value: RuntimeValue): unknown {
     if (value instanceof PrimitiveValue) return value.value;

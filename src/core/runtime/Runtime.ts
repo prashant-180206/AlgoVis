@@ -140,11 +140,16 @@ export class Runtime {
     );
     const collect = (scope: Scope): void => {
       if (environments.has(scope.id)) return;
-      if (scope.parentScope) collect(scope.parentScope);
+      const environmentParent = scope.environmentParent;
+      if (environmentParent) collect(environmentParent);
+      // Lexical scopes (closures, modules) still need to appear even when the
+      // visualization parent points at a caller frame instead.
+      if (scope.parentScope && scope.parentScope !== environmentParent)
+        collect(scope.parentScope);
       const entries = scope.entries();
       environments.set(scope.id, {
         id: scope.id,
-        parentId: scope.parentScope?.id,
+        parentId: environmentParent?.id,
         active:
           scope.id === this.globals.id ||
           frameScopeIds.has(scope.id) ||

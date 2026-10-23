@@ -203,6 +203,7 @@ export function RuntimeInspector({
         : environment.active,
     includeAncestors: (environment) =>
       environment.kind === "global" ||
+      environment.active ||
       environment.variables.some((variable) => !variable.builtin),
     rootId: snapshot?.globalEnvironmentId,
   });

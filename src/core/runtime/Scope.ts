@@ -8,7 +8,10 @@ export class Scope {
   private readonly declaredTypes = new Map<string, TypeReference>();
   private readonly builtins = new Set<string>();
 
-  public constructor(public readonly parent?: Scope) {}
+  public constructor(
+    public readonly parent?: Scope,
+    private readonly hierarchyParent?: Scope,
+  ) {}
 
   public define(
     name: string,
@@ -81,7 +84,19 @@ export class Scope {
     this.declaredTypes.clear();
     this.builtins.clear();
   }
+  /** Lexical parent used for identifier lookup. */
   public get parentScope(): Scope | undefined {
     return this.parent;
+  }
+
+  /**
+   * Parent used by the environment visualization.
+   *
+   * This is normally the lexical parent. Call frames override it with the
+   * caller's frame so nested calls render as a real call-stack hierarchy
+   * while identifier lookup still follows lexical scope.
+   */
+  public get environmentParent(): Scope | undefined {
+    return this.hierarchyParent ?? this.parent;
   }
 }

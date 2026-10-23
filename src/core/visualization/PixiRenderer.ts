@@ -184,6 +184,7 @@ export class PixiRenderer {
       shouldInclude: (environment) => environment.active,
       includeAncestors: (environment) =>
         environment.kind === "global" ||
+        environment.active ||
         environment.variables.some((variable) => !variable.builtin),
       rootId: this.state.rootEnvironmentId,
     });

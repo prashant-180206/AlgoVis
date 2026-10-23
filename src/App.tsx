@@ -75,6 +75,11 @@ console.log("top", top, "total", total);`;
 
 const projector = new VisualizationProjector();
 const speedIntervals = [900, 650, 450, 280, 150];
+const EMPTY_VISUALIZATION = {
+  environments: [],
+  objects: [],
+  stepIndex: 0,
+} as const;
 
 function parseProgram(source: string): Program {
   return new Parser(new Lexer(source).tokenize()).parse();
@@ -171,7 +176,12 @@ function App() {
       return {
         tokens,
         program,
-        interpreter: new Interpreter(program, new Runtime(), modules),
+        interpreter: new Interpreter(
+          program,
+          new Runtime(),
+          modules,
+          entryModuleId,
+        ),
         error: undefined,
       };
     } catch (error) {
@@ -182,7 +192,7 @@ function App() {
         error: errorMessage(error),
       };
     }
-  }, [source, modules]);
+  }, [source, modules, entryModuleId]);
   const imports = useMemo(
     () => (parsed.program ? importsOf(parsed.program) : []),
     [parsed.program],
@@ -263,10 +273,7 @@ function App() {
   }, [parsed.program, moduleSources, entryModuleId, workspace, moduleReload]);
 
   const visualization = useMemo(
-    () =>
-      snapshot
-        ? projector.project(snapshot)
-        : { environments: [], objects: [], stepIndex: 0 },
+    () => (snapshot ? projector.project(snapshot) : EMPTY_VISUALIZATION),
     [snapshot],
   );
   const selectedEvent = snapshot?.events[snapshot.events.length - 1];
