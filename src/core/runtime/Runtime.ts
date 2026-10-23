@@ -29,7 +29,11 @@ export class Runtime {
   public readonly callStack: CallFrame[] = [];
   public readonly frameHistory: FrameHistoryEntry[] = [];
   public readonly snapshots: RuntimeSnapshot[] = [];
+  /** Coarse, line-oriented history used by the step debugger. */
+  public readonly steps: RuntimeSnapshot[] = [];
   public readonly trace = new ExecutionTrace();
+  private readonly activeBlockScopes = new Set<string>();
+  private readonly moduleScopeIds = new Set<string>();
   public currentLocation?: SourceLocation;
   public stepIndex = 0;
 
@@ -41,6 +45,22 @@ export class Runtime {
   public registerScope(scope: Scope): Scope {
     this.knownScopes.set(scope.id, scope);
     return scope;
+  }
+
+  /** Registers a module's top-level scope and tags it for environment labels. */
+  public registerModuleScope(scope: Scope): Scope {
+    this.knownScopes.set(scope.id, scope);
+    this.moduleScopeIds.add(scope.id);
+    return scope;
+  }
+
+  /** Marks a block scope as currently executing so snapshots can show it. */
+  public enterBlockScope(scope: Scope): void {
+    this.activeBlockScopes.add(scope.id);
+  }
+
+  public leaveBlockScope(scope: Scope): void {
+    this.activeBlockScopes.delete(scope.id);
   }
 
   public enterFrame(frame: CallFrame): void {
@@ -72,10 +92,13 @@ export class Runtime {
     this.callStack.length = 0;
     this.frameHistory.length = 0;
     this.snapshots.length = 0;
+    this.steps.length = 0;
     this.trace.clear();
     this.globals.clear();
     this.knownScopes.clear();
     this.knownScopes.set(this.globals.id, this.globals);
+    this.activeBlockScopes.clear();
+    this.moduleScopeIds.clear();
     this.currentLocation = undefined;
     this.stepIndex = 0;
   }
@@ -93,6 +116,22 @@ export class Runtime {
     return snapshot;
   }
 
+  /**
+   * Captures the state that should be shown before a statement runs.
+   *
+   * Event snapshots are intentionally fine-grained (one per READ, COMPARE,
+   * etc.). `steps` is the playback timeline: one entry per statement, with
+   * the source location of the statement that is about to execute.
+   */
+  public recordStep(location?: SourceLocation): RuntimeSnapshot {
+    const previousLocation = this.currentLocation;
+    this.currentLocation = location;
+    const snapshot = this.snapshot();
+    this.steps.push(snapshot);
+    this.currentLocation = previousLocation;
+    return snapshot;
+  }
+
   public snapshot(): RuntimeSnapshot {
     const environments = new Map<string, EnvironmentSnapshot>();
     const valueCopies = new Map<RuntimeObject, RuntimeValue>();
@@ -102,19 +141,23 @@ export class Runtime {
     const collect = (scope: Scope): void => {
       if (environments.has(scope.id)) return;
       if (scope.parentScope) collect(scope.parentScope);
+      const entries = scope.entries();
       environments.set(scope.id, {
         id: scope.id,
         parentId: scope.parentScope?.id,
-        active: scope.id === this.globals.id || frameScopeIds.has(scope.id),
+        active:
+          scope.id === this.globals.id ||
+          frameScopeIds.has(scope.id) ||
+          (this.activeBlockScopes.has(scope.id) && entries.length > 0),
         kind:
           scope.id === this.globals.id
             ? "global"
             : frameScopeIds.has(scope.id)
               ? "function"
               : "block",
-        variables: scope
-          .entries()
-          .map(([name, value]) => this.describeVariable(scope, name, value, valueCopies)),
+        variables: entries.map(([name, value]) =>
+          this.describeVariable(scope, name, value, valueCopies),
+        ),
       });
     };
     this.knownScopes.forEach((scope) => collect(scope));
@@ -166,6 +209,7 @@ export class Runtime {
       objectId: this.objectId(value),
       className: value instanceof InstanceValue ? value.className : undefined,
       isObject: object && !(value instanceof PrimitiveValue),
+      builtin: scope.isBuiltin(name),
     };
   }
 
@@ -230,6 +274,7 @@ export interface VariableSnapshot {
   readonly objectId?: string;
   readonly className?: string;
   readonly isObject?: boolean;
+  readonly builtin?: boolean;
 }
 export interface EnvironmentSnapshot {
   readonly id: string;

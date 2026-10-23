@@ -1,38 +1,66 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Activity, Maximize2, ScanLine } from "lucide-react";
-import type { VisualizationState } from "../core";
+import { PixiRenderer, type VisualizationState } from "../core";
 import { Card, CardHeader } from "./ui/card";
 import { Button } from "./ui/button";
 
 interface VisualizationStageProps {
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   visualization: VisualizationState;
-  onPan: (deltaX: number, deltaY: number) => void;
-  onResetView: () => void;
+  stepIndex: number;
+  stepCount: number;
 }
 
 export function VisualizationStage({
-  canvasRef,
   visualization,
-  onPan,
-  onResetView,
+  stepIndex,
+  stepCount,
 }: VisualizationStageProps) {
-  const pointer = useRef<{ x: number; y: number } | undefined>(undefined);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<PixiRenderer | undefined>(undefined);
+  const latestState = useRef(visualization);
+  const [ready, setReady] = useState(false);
+  latestState.current = visualization;
 
-  function beginPan(event: React.PointerEvent<HTMLCanvasElement>): void {
-    pointer.current = { x: event.clientX, y: event.clientY };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    let cancelled = false;
+    const renderer = new PixiRenderer();
+    rendererRef.current = renderer;
+    void renderer
+      .init(host)
+      .then(() => {
+        if (cancelled) return;
+        renderer.render(latestState.current);
+        setReady(true);
+      })
+      .catch((error: unknown) => {
+        console.error("Unable to initialize the PixiJS visualization", error);
+      });
+    return () => {
+      cancelled = true;
+      renderer.destroy();
+      if (rendererRef.current === renderer) rendererRef.current = undefined;
+    };
+  }, []);
 
-  function movePan(event: React.PointerEvent<HTMLCanvasElement>): void {
-    if (!pointer.current) return;
-    onPan(event.clientX - pointer.current.x, event.clientY - pointer.current.y);
-    pointer.current = { x: event.clientX, y: event.clientY };
-  }
+  useEffect(() => {
+    if (ready) rendererRef.current?.render(visualization);
+  }, [ready, visualization]);
 
-  function endPan(event: React.PointerEvent<HTMLCanvasElement>): void {
-    pointer.current = undefined;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+  const hasUserState =
+    visualization.objects.length > 0 ||
+    visualization.environments.some(
+      (environment) =>
+        environment.active &&
+        environment.variables.some((variable) => !variable.builtin),
+    );
+
+  function toggleFullscreen(): void {
+    const host = hostRef.current;
+    if (!host) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void host.requestFullscreen();
   }
 
   return (
@@ -46,12 +74,12 @@ export function VisualizationStage({
         </div>
         <div className="flex items-center gap-1">
           <span className="mr-2 text-[10px] uppercase tracking-wider text-zinc-600">
-            Canvas 2D · {visualization.objects.length} objects
+            PixiJS · {visualization.objects.length} objects
           </span>
           <Button
             variant="ghost"
             size="icon"
-            onClick={onResetView}
+            onClick={() => rendererRef.current?.resetView()}
             aria-label="Fit visualization"
             title="Fit visualization"
           >
@@ -60,6 +88,7 @@ export function VisualizationStage({
           <Button
             variant="ghost"
             size="icon"
+            onClick={toggleFullscreen}
             aria-label="Fullscreen visualization"
             title="Fullscreen visualization"
           >
@@ -68,26 +97,20 @@ export function VisualizationStage({
         </div>
       </CardHeader>
       <div
-        className="relative min-h-0 flex-1 overflow-hidden bg-[#121612]"
+        ref={hostRef}
+        className="relative min-h-0 flex-1 cursor-grab overflow-hidden bg-[#121612] active:cursor-grabbing"
         style={{
           backgroundImage:
             "linear-gradient(rgba(216,242,122,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(216,242,122,.035) 1px, transparent 1px)",
           backgroundSize: "28px 28px",
         }}
       >
-        <canvas
-          className="h-full min-h-100 w-full cursor-grab active:cursor-grabbing"
-          ref={canvasRef}
-          width={900}
-          height={420}
-          onPointerDown={beginPan}
-          onPointerMove={movePan}
-          onPointerUp={endPan}
-          onPointerCancel={endPan}
-          onWheel={(event) => onPan(-event.deltaX, -event.deltaY)}
-          aria-label="Algorithm visualization canvas"
-        />
-        {visualization.objects.length === 0 ? (
+        {!ready ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-[0.18em] text-zinc-600">
+            starting pixi renderer
+          </div>
+        ) : null}
+        {ready && !hasUserState ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
             <div className="grid h-14 w-14 place-items-center rounded-lg border border-dashed border-lime-300/30 text-lime-300">
               <Activity className="h-6 w-6" />
@@ -102,8 +125,11 @@ export function VisualizationStage({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center justify-between border-t border-white/8 px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-zinc-600">
-        <span>Object projection</span>
-        <span>STEP {visualization.stepIndex}</span>
+        <span>Environment projection</span>
+        <span className="font-mono text-zinc-500">
+          STEP {stepCount === 0 ? 0 : stepIndex} / {Math.max(0, stepCount - 1)}
+          {visualization.activeOperation ? ` · ${visualization.activeOperation}` : ""}
+        </span>
       </div>
     </Card>
   );

@@ -6,6 +6,7 @@ export class Scope {
   public readonly id = `env-${++Scope.nextId}`;
   private readonly bindings = new Map<string, RuntimeValue>();
   private readonly declaredTypes = new Map<string, TypeReference>();
+  private readonly builtins = new Set<string>();
 
   public constructor(public readonly parent?: Scope) {}
 
@@ -15,7 +16,19 @@ export class Scope {
     declaredType?: TypeReference,
   ): void {
     this.bindings.set(name, value);
+    this.builtins.delete(name);
     if (declaredType) this.declaredTypes.set(name, declaredType);
+  }
+
+  /** Defines a host-provided binding that the inspector can hide. */
+  public defineBuiltin(name: string, value: RuntimeValue): void {
+    this.bindings.set(name, value);
+    this.declaredTypes.delete(name);
+    this.builtins.add(name);
+  }
+
+  public isBuiltin(name: string): boolean {
+    return this.builtins.has(name);
   }
 
   public assign(name: string, value: RuntimeValue): void {
@@ -56,6 +69,7 @@ export class Scope {
   public clear(): void {
     this.bindings.clear();
     this.declaredTypes.clear();
+    this.builtins.clear();
   }
   public get parentScope(): Scope | undefined {
     return this.parent;

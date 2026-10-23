@@ -14,6 +14,26 @@ button, input { font: inherit; }
 button { cursor: pointer; }
 code, .font-mono { font-family: "DM Mono", monospace; }
 
+.algovis-current-line {
+  background: rgba(216, 242, 122, 0.09) !important;
+  border-top: 1px solid rgba(216, 242, 122, 0.18);
+  border-bottom: 1px solid rgba(216, 242, 122, 0.18);
+}
+
+.algovis-current-line-glyph::before {
+  content: "▶";
+  display: block;
+  margin-left: 3px;
+  color: #d8f27a;
+  font-size: 9px;
+  line-height: 22px;
+}
+
+.algovis-current-line-gutter {
+  border-left: 2px solid #d8f27a;
+  margin-left: 3px;
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: #111411; }
 ::-webkit-scrollbar-thumb { background: #303a32; border-radius: 8px; }

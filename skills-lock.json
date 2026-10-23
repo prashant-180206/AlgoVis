@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "skills": {
+    "pixijs": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs/SKILL.md",
+      "computedHash": "f78ceb280d24b66173203c650b21e99d5c44a750fd73ecf62f15b40f5a42f248"
+    },
+    "pixijs-application": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-application/SKILL.md",
+      "computedHash": "cd934097e38d8c4c31dfdf1626ebb8c83ae7686b6e198b70b83ff477a4ca5cbc"
+    },
+    "pixijs-blend-modes": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-blend-modes/SKILL.md",
+      "computedHash": "70fda56e4c389c0c582cc938e7f417e6733131212731e565841d16f9ca15cc5a"
+    },
+    "pixijs-color": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-color/SKILL.md",
+      "computedHash": "0a2e1a643dba3bbb20cc71ed059ff6e2c42146b54be107610cd3ddca2a7acf16"
+    },
+    "pixijs-core-concepts": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-core-concepts/SKILL.md",
+      "computedHash": "0119371de1742ab679d3e677cd0799ff451bfa671871e5ab9058af0246d7c2be"
+    },
+    "pixijs-create": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-create/SKILL.md",
+      "computedHash": "03dfc5b76458ca2bb971cc71974027892e887f0fd8d537ec73a23a41ee647cfb"
+    },
+    "pixijs-custom-rendering": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-custom-rendering/SKILL.md",
+      "computedHash": "fc7361e30003a0a5db9bdcaf44deb147a02ee40dd3d80a832926df49f3df3e12"
+    },
+    "pixijs-environments": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-environments/SKILL.md",
+      "computedHash": "966cc6d337fe80d0f94541270a13a06f5d7243919bbe0690e76556930651463a"
+    },
+    "pixijs-html-source": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-html-source/SKILL.md",
+      "computedHash": "ff9498bad41fd8263d42d53fab6e5f6a872176b6c08f73d6995e0bea7c0c944d"
+    },
+    "pixijs-math": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-math/SKILL.md",
+      "computedHash": "dd5f58e31c8d74de1ffe1abe22ffa82de1768d9400459974217079d0fda9497e"
+    },
+    "pixijs-scene-container": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-scene-container/SKILL.md",
+      "computedHash": "3c46a5a870862c3f3dcf8e76d64c52c12162d6403383866b68b417d6c7a29495"
+    },
+    "pixijs-scene-core-concepts": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-scene-core-concepts/SKILL.md",
+      "computedHash": "74639f268876b469c8cc9235f4b67f88f96cace5e167cb8d3d9996af7f32a9c1"
+    },
+    "pixijs-scene-dom-container": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-scene-dom-container/SKILL.md",
+      "computedHash": "1b0621282de0d6049478b33835bbce55931986d55a1519118712df8a81e99ddb"
+    },
+    "pixijs-scene-sprite": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-scene-sprite/SKILL.md",
+      "computedHash": "275f2d12eaba5ed3369f1aacb5559691a7da4d56d4400d555eb600a9c6a71a78"
+    },
+    "pixijs-scene-text": {
+      "source": "pixijs/pixijs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/pixijs-scene-text/SKILL.md",
+      "computedHash": "47be1062e1e6a60a46f2704df4de058d2daa206a67c7423d9023d930c7e89add"
+    },
+    "shadcn": {
+      "source": "shadcn/ui",
+      "sourceType": "github",
+      "skillPath": "skills/shadcn/SKILL.md",
+      "computedHash": "7859e9a064940a1a0010c992b63e4633c4f5f39ed367a23c16f24029816b1703"
+    },
+    "tauri": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri/SKILL.md",
+      "computedHash": "6064802b8f855530f76c812106b772166ac2388a7928e72c37901bcdfe93483b"
+    },
+    "tauri-app-autostart": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-autostart/SKILL.md",
+      "computedHash": "602c124fda5a64d3d48742420612b726f7aa978f19c1e2722f2fdfa89ef0d21c"
+    },
+    "tauri-app-cli": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-cli/SKILL.md",
+      "computedHash": "9c44c80092328b9a9efa09e2ddfdd466a284d9445e9a58d69fb55f208be00fa7"
+    },
+    "tauri-app-develop": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-develop/SKILL.md",
+      "computedHash": "96232471a794bd571ea89e19ed1706e3f0a426e3b4ab5acf2a993eb7aeb0e6a4"
+    },
+    "tauri-app-dialog": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-dialog/SKILL.md",
+      "computedHash": "f8ca074d7f3413d2c2a2f837a256eca4558d604b250728b175fbb44e17e54bb9"
+    },
+    "tauri-app-file-system": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-file-system/SKILL.md",
+      "computedHash": "7c7d9f4949358a2fcebc9cba0b9f145a5b09a11d34e7e3d1595a2abb4443d5da"
+    },
+    "tauri-app-frontend-selection": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-frontend-selection/SKILL.md",
+      "computedHash": "a7dd3d17b8aa51d8bd15e53968a2caedf6ac76196bc108ea2ca5567f7570030f"
+    },
+    "tauri-app-localhost": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-localhost/SKILL.md",
+      "computedHash": "61a3273eae5e8b46a441816a663d0cf86999b64890d34dadad86d8969cd8f831"
+    },
+    "tauri-app-logging": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-logging/SKILL.md",
+      "computedHash": "a05d32f5cafb2f8832b6ec1b5b7de907fe369d1c49ac3ab59b84fe3ccd8dce33"
+    },
+    "tauri-app-planning": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-planning/SKILL.md",
+      "computedHash": "f5095a3bf2169e48361943dbd7a251a3a1f33091816d0e3ce50c9403e5e6d0c1"
+    },
+    "tauri-app-shell": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-shell/SKILL.md",
+      "computedHash": "1bad30865ff6a9c413e803d88017643f90cba99c6dc2c7c2da6d1909124fbb18"
+    },
+    "tauri-app-store": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-store/SKILL.md",
+      "computedHash": "71cea9283b20b8550f2fd76db93a5c7ebcae272e3b0af7482ed6c3ab1c5387d5"
+    },
+    "tauri-app-websocket": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-app-websocket/SKILL.md",
+      "computedHash": "789a506bc278b6927c76eb0ec73f092e9bdd46f840f184796e005ce27762c8e4"
+    },
+    "tauri-build": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-build/SKILL.md",
+      "computedHash": "45ac9e0576757a77e849ffd96dc3cab2834d3e05e2ca9853acfcb5af5dfef03e"
+    },
+    "tauri-window": {
+      "source": "full-stack-skills/tauri-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tauri-window/SKILL.md",
+      "computedHash": "bbb18374f975dbd0f917fe1cd46d89380c361f93f35712bdc73c795d4efd5f04"
+    }
+  }
+}

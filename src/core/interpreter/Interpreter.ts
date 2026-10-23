@@ -55,11 +55,16 @@ class ContinueSignal {}
 export class Interpreter {
   private cursor = 0;
   private objectId = 0;
+  private skipFirstRecordedStep = false;
   public status = InterpreterStatus.Ready;
   public lastError?: Error;
   public readonly runtime: Runtime;
   public get history(): readonly RuntimeSnapshot[] {
     return this.runtime.snapshots;
+  }
+  /** One snapshot per executed statement, including nested block statements. */
+  public get steps(): readonly RuntimeSnapshot[] {
+    return this.runtime.steps;
   }
   public constructor(
     private readonly program: Program,
@@ -68,6 +73,7 @@ export class Interpreter {
     this.runtime = runtime;
     this.installBuiltins();
     this.runtime.captureSnapshot();
+    this.recordInitialStep();
   }
   public start(): RuntimeSnapshot {
     this.status = InterpreterStatus.Running;
@@ -94,11 +100,13 @@ export class Interpreter {
         this.cursor >= this.program.statements.length
           ? InterpreterStatus.Finished
           : InterpreterStatus.Paused;
-      if (this.status === InterpreterStatus.Finished)
+      if (this.status === InterpreterStatus.Finished) {
         this.runtime.emit({
           type: ExecutionEventType.ProgramFinished,
           location: statement.location,
         });
+        this.runtime.recordStep(statement.location);
+      }
     } catch (error) {
       this.lastError =
         error instanceof Error ? error : new Error(String(error));
@@ -108,6 +116,7 @@ export class Interpreter {
         location: statement.location,
         payload: { message: this.lastError.message },
       });
+      this.runtime.recordStep(statement.location);
     }
     return this.recordSnapshot();
   }
@@ -132,9 +141,24 @@ export class Interpreter {
     this.runtime.resetExecution();
     this.installBuiltins();
     this.runtime.captureSnapshot();
+    this.recordInitialStep();
   }
   public get currentStatementIndex(): number {
     return this.cursor;
+  }
+
+  private recordInitialStep(): void {
+    this.runtime.recordStep(this.program.statements[0]?.location);
+    this.skipFirstRecordedStep = true;
+  }
+
+  private recordStep(statement: Statement): void {
+    if (statement instanceof BlockStatement) return;
+    if (this.skipFirstRecordedStep) {
+      this.skipFirstRecordedStep = false;
+      return;
+    }
+    this.runtime.recordStep(statement.location);
   }
 
   private recordSnapshot(): RuntimeSnapshot {
@@ -142,9 +166,15 @@ export class Interpreter {
   }
 
   private execute(statement: Statement, scope: Scope): void {
+    this.recordStep(statement);
     if (statement instanceof BlockStatement) {
       const blockScope = this.createScope(scope);
-      statement.statements.forEach((child) => this.execute(child, blockScope));
+      this.runtime.enterBlockScope(blockScope);
+      try {
+        statement.statements.forEach((child) => this.execute(child, blockScope));
+      } finally {
+        this.runtime.leaveBlockScope(blockScope);
+      }
       return;
     }
     if (statement instanceof VariableDeclarationStatement) {
@@ -171,7 +201,10 @@ export class Interpreter {
       return;
     }
     if (statement instanceof WhileStatement) {
+      let iteration = 0;
       while (this.truthy(this.evaluate(statement.condition, scope))) {
+        if (iteration > 0) this.runtime.recordStep(statement.location);
+        iteration += 1;
         try {
           this.execute(statement.body, scope);
         } catch (signal) {
@@ -183,21 +216,30 @@ export class Interpreter {
     }
     if (statement instanceof ForStatement) {
       const loopScope = this.createScope(scope);
-      if (statement.initializer instanceof Statement)
-        this.execute(statement.initializer, loopScope);
-      else if (statement.initializer)
-        this.evaluate(statement.initializer, loopScope);
-      while (
-        !statement.condition ||
-        this.truthy(this.evaluate(statement.condition, loopScope))
-      ) {
-        try {
-          this.execute(statement.body, loopScope);
-        } catch (signal) {
-          if (signal instanceof BreakSignal) break;
-          if (!(signal instanceof ContinueSignal)) throw signal;
+      this.runtime.enterBlockScope(loopScope);
+      try {
+        if (statement.initializer instanceof Statement)
+          this.execute(statement.initializer, loopScope);
+        else if (statement.initializer)
+          this.evaluate(statement.initializer, loopScope);
+        let iteration = 0;
+        while (
+          !statement.condition ||
+          this.truthy(this.evaluate(statement.condition, loopScope))
+        ) {
+          if (iteration > 0) this.runtime.recordStep(statement.location);
+          iteration += 1;
+          try {
+            this.execute(statement.body, loopScope);
+          } catch (signal) {
+            if (signal instanceof BreakSignal) break;
+            if (!(signal instanceof ContinueSignal)) throw signal;
+          }
+          if (statement.increment)
+            this.evaluate(statement.increment, loopScope);
         }
-        if (statement.increment) this.evaluate(statement.increment, loopScope);
+      } finally {
+        this.runtime.leaveBlockScope(loopScope);
       }
       return;
     }
@@ -579,7 +621,7 @@ export class Interpreter {
           (name === "length" || /^\d+$/.test(name));
   }
   private installBuiltins(): void {
-    this.runtime.globals.define(
+    this.runtime.globals.defineBuiltin(
       "console",
       new ObjectValue(
         new Map([
@@ -606,7 +648,7 @@ export class Interpreter {
         ]),
       ),
     );
-    this.runtime.globals.define(
+    this.runtime.globals.defineBuiltin(
       "Number",
       new FunctionValue(
         "Number",
@@ -615,7 +657,7 @@ export class Interpreter {
         (value) => new PrimitiveValue(this.number(value)),
       ),
     );
-    this.runtime.globals.define(
+    this.runtime.globals.defineBuiltin(
       "String",
       new FunctionValue(
         "String",
@@ -624,7 +666,7 @@ export class Interpreter {
         (value) => new PrimitiveValue(String(this.primitive(value))),
       ),
     );
-    this.runtime.globals.define(
+    this.runtime.globals.defineBuiltin(
       "Array",
       new FunctionValue(
         "Array",

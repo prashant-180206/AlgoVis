@@ -1,11 +1,11 @@
 # AlgoVis Core
 
-The core is framework-independent TypeScript. It does not import React, Canvas components, or Tauri APIs. The application feeds source text into the language pipeline and consumes immutable runtime snapshots for inspection and visualization.
+The core is framework-independent TypeScript. It does not import React or Tauri APIs. The application feeds source text into the language pipeline and consumes immutable runtime snapshots for inspection and visualization. The visualization module is the only part of core that talks to a rendering library, and it is isolated behind the `VisualizationState` projection.
 
 ## Pipeline
 
 ```text
-source -> Lexer -> Token[] -> Parser -> Program/AST -> Interpreter -> RuntimeSnapshot -> VisualizationProjector -> CanvasRenderer
+source -> Lexer -> Token[] -> Parser -> Program/AST -> Interpreter -> RuntimeSnapshot -> VisualizationProjector -> PixiRenderer
 ```
 
 ## Modules
@@ -14,7 +14,7 @@ source -> Lexer -> Token[] -> Parser -> Program/AST -> Interpreter -> RuntimeSna
 - `interpreter`: evaluation of declarations, expressions, functions, classes, objects, arrays, calls, control flow, and assignments.
 - `runtime`: scopes, environments, runtime values, class registries, call frames, snapshots, and snapshot history.
 - `execution`: execution event types and the trace of observable operations.
-- `visualization`: projection of snapshots into serializable visual objects and Canvas 2D drawing.
+- `visualization`: projection of snapshots into serializable visual objects and PixiJS drawing.
 
 ## Public entry point
 
@@ -38,6 +38,10 @@ It is an educational interpreter, not a full JavaScript engine. New syntax must 
 
 Use `RuntimeSnapshot` as the UI boundary. It contains globals, all retained environments, active call frames, frame history, source location, events, and a step index. Runtime scopes and mutable runtime values should not be stored directly in React state.
 
+`Runtime.steps` is the playback timeline: one snapshot per executed statement, captured before the statement runs. It includes nested statements in blocks, loops, and function bodies. Use `Interpreter.steps` for step-forward/back navigation and `RuntimeSnapshot.currentLocation` for the editor's current-line highlight. Use `Runtime.snapshots` when fine-grained per-event state is needed.
+
+Host-provided bindings such as `console` are flagged with `builtin: true`; UIs should hide or group them separately from user variables.
+
 When adding a mutable runtime value, update:
 
 1. The `RuntimeValue` union.
@@ -47,15 +51,17 @@ When adding a mutable runtime value, update:
 
 ## Visualization contract
 
-`VisualizationProjector` converts snapshots into `VisualizationState` without exposing runtime internals to Canvas. The state includes environment cards plus visual arrays, objects, instances, and reserved stack objects.
+`VisualizationProjector` converts snapshots into `VisualizationState` without exposing runtime internals to PixiJS. The state includes environment cards plus visual arrays, objects, instances, and stacks.
 
-`CanvasRenderer` supports:
+`PixiRenderer` supports:
 
 - Generic environment and field panels.
-- Existing array rendering.
-- Reserved stack rendering.
+- Array rendering with active index highlighting.
+- Stack rendering for user classes named `Stack` with an `items` array.
 - `registerClassRenderer()` for future Queue, LinkedList, Tree, or other class-specific visuals.
 - `panBy()` and `resetView()` for large visual worlds.
+
+`CanvasRenderer` is retained as a Canvas 2D fallback with the same projection contract.
 
 Custom renderers should draw only from the projected visual object. Data-structure mutation belongs in runtime code.
 
@@ -64,7 +70,7 @@ Custom renderers should draw only from the projected visual object. Data-structu
 Run the full application validation with:
 
 ```powershell
-npm run build
+pnpm build
 ```
 
-For a feature smoke test, use the editor with a small program that creates a value, mutates it across semicolon-delimited statements, and inspects the runtime-state panel and visualization history.
+For a feature smoke test, use the editor with a small program that creates a value, mutates it across semicolon-delimited statements, and inspects the runtime-state panel, current-line decoration, execution trace, and visualization step by step.

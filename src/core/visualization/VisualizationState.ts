@@ -6,6 +6,7 @@ import {
   InstanceValue,
   ObjectValue,
   PrimitiveValue,
+  RuntimeObject,
   RuntimeValue,
 } from "../runtime/Values";
 
@@ -16,12 +17,13 @@ export interface VisualVariable {
   readonly objectId?: string;
   readonly className?: string;
   readonly isObject?: boolean;
+  readonly builtin?: boolean;
 }
 
 export interface VisualEnvironment {
   readonly id: string;
   readonly parentId?: string;
-  readonly kind: "global" | "function" | "block";
+  readonly kind: "global" | "module" | "function" | "block";
   readonly active: boolean;
   readonly variables: readonly VisualVariable[];
 }
@@ -32,13 +34,6 @@ export interface VisualArray {
   readonly label: string;
   readonly values: readonly string[];
   readonly activeIndices: readonly number[];
-}
-
-export interface VisualStack {
-  readonly type: "stack";
-  readonly id: string;
-  readonly label: string;
-  readonly values: readonly string[];
 }
 
 export interface VisualInstance {
@@ -56,17 +51,14 @@ export interface VisualObject {
   readonly fields: readonly VisualVariable[];
 }
 
-export type VisualObjectNode =
-  | VisualArray
-  | VisualStack
-  | VisualInstance
-  | VisualObject;
+export type VisualObjectNode = VisualArray | VisualInstance | VisualObject;
 
 export interface VisualizationState {
   readonly environments: readonly VisualEnvironment[];
   readonly objects: readonly VisualObjectNode[];
   readonly activeOperation?: ExecutionEventType;
   readonly stepIndex: number;
+  readonly rootEnvironmentId?: string;
 }
 
 export class VisualizationProjector {
@@ -81,11 +73,12 @@ export class VisualizationProjector {
       ),
     }));
     const objects: VisualObjectNode[] = [];
-    const seen = new Set<string>();
+    const seen = new WeakSet<RuntimeObject>();
     snapshot.environments.forEach((environment) =>
-      environment.variables.forEach((variable) =>
-        this.projectObject(variable.name, variable.value, objects, seen),
-      ),
+      environment.variables.forEach((variable) => {
+        if (!variable.builtin)
+          this.projectObject(variable.name, variable.value, objects, seen);
+      }),
     );
     const lastEvent = snapshot.events[snapshot.events.length - 1];
     return {
@@ -93,6 +86,7 @@ export class VisualizationProjector {
       objects,
       activeOperation: lastEvent?.type,
       stepIndex: snapshot.stepIndex,
+      rootEnvironmentId: snapshot.globalEnvironmentId,
     };
   }
 
@@ -100,21 +94,20 @@ export class VisualizationProjector {
     label: string,
     value: RuntimeValue,
     objects: VisualObjectNode[],
-    seen: Set<string>,
+    seen: WeakSet<RuntimeObject>,
   ): void {
     if (value instanceof ArrayValue) {
-      if (seen.has(value.id)) return;
-      seen.add(value.id);
+      if (seen.has(value)) return;
+      seen.add(value);
       objects.push(this.projectArray(label, value));
       return;
     }
     if (value instanceof InstanceValue) {
-      const id = `${value.className}:${label}`;
-      if (seen.has(id)) return;
-      seen.add(id);
+      if (seen.has(value)) return;
+      seen.add(value);
       objects.push({
         type: "instance",
-        id,
+        id: `${value.className}:${label}`,
         label,
         className: value.className,
         fields: [...value.properties.entries()].map(([name, item]) =>
@@ -127,12 +120,11 @@ export class VisualizationProjector {
       return;
     }
     if (value instanceof ObjectValue) {
-      const id = `object:${label}`;
-      if (seen.has(id)) return;
-      seen.add(id);
+      if (seen.has(value)) return;
+      seen.add(value);
       objects.push({
         type: "object",
-        id,
+        id: `object:${label}`,
         label,
         fields: [...value.properties.entries()].map(([name, item]) =>
           this.projectVariable(name, item),
@@ -148,7 +140,7 @@ export class VisualizationProjector {
     label: string,
     value: RuntimeValue,
     objects: VisualObjectNode[],
-    seen: Set<string>,
+    seen: WeakSet<RuntimeObject>,
   ): void {
     if (
       value instanceof ArrayValue ||
@@ -176,6 +168,7 @@ export class VisualizationProjector {
       objectId?: string;
       className?: string;
       isObject?: boolean;
+      builtin?: boolean;
     },
   ): VisualVariable {
     return {
@@ -187,6 +180,7 @@ export class VisualizationProjector {
         snapshot?.className ??
         (value instanceof InstanceValue ? value.className : undefined),
       isObject: snapshot?.isObject ?? !(value instanceof PrimitiveValue),
+      builtin: snapshot?.builtin,
     };
   }
 

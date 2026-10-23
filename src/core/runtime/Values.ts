@@ -169,20 +169,47 @@ export class FunctionValue extends RuntimeObject {
   }
 }
 
-export function displayValue(value: RuntimeValue): string {
-  if (value instanceof ArrayValue)
-    return `[${value.values.map(displayValue).join(", ")}]`;
+export function displayValue(
+  value: RuntimeValue,
+  seen = new WeakSet<RuntimeObject>(),
+): string {
+  if (value instanceof ArrayValue) {
+    if (seen.has(value)) return "[↻]";
+    seen.add(value);
+    const result = `[${value.values.map((item) => displayValue(item, seen)).join(", ")}]`;
+    seen.delete(value);
+    return result;
+  }
   if (value instanceof ArrayPointerValue)
     return `&${value.array.id}[${value.index}]`;
   if (value instanceof FunctionValue) return `<function ${value.name}>`;
   if (value instanceof ClassValue) return `<class ${value.name}>`;
-  if (value instanceof InstanceValue)
-    return `<${value.className} ${displayValue(new ObjectValue(value.properties))}>`;
-  if (value instanceof ObjectValue)
-    return `{${[...value.properties.entries()].map(([key, item]) => `${key}: ${displayValue(item)}`).join(", ")}}`;
+  if (value instanceof InstanceValue) {
+    if (seen.has(value)) return `<${value.className} ↻>`;
+    seen.add(value);
+    const result = `<${value.className} ${displayProperties(value.properties, seen)}>`;
+    seen.delete(value);
+    return result;
+  }
+  if (value instanceof ObjectValue) {
+    if (seen.has(value)) return "{↻}";
+    seen.add(value);
+    const result = displayProperties(value.properties, seen);
+    seen.delete(value);
+    return result;
+  }
   return value.value === null
     ? "null"
     : value.value === undefined
       ? "undefined"
       : String(value.value);
+}
+
+function displayProperties(
+  properties: ReadonlyMap<string, RuntimeValue>,
+  seen: WeakSet<RuntimeObject>,
+): string {
+  return `{${[...properties.entries()]
+    .map(([key, item]) => `${key}: ${displayValue(item, seen)}`)
+    .join(", ")}}`;
 }

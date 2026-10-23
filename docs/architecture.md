@@ -9,10 +9,10 @@ source
   -> Parser
   -> AST
   -> Interpreter
-  -> Runtime + ExecutionTrace + RuntimeSnapshots
+  -> Runtime + ExecutionTrace + RuntimeSnapshots + step timeline
   -> VisualizationProjector
   -> VisualizationState
-  -> CanvasRenderer
+  -> PixiRenderer
 ```
 
 ## Boundaries
@@ -21,8 +21,8 @@ source
 - `src/core/interpreter` evaluates AST nodes, creates scopes, invokes functions and methods, and controls execution status.
 - `src/core/runtime` owns values, scopes, classes, call frames, event history, snapshots, and retained environments.
 - `src/core/execution` defines observable execution events and the event trace.
-- `src/core/visualization` converts runtime snapshots into renderer-safe state and draws that state with Canvas 2D.
-- `src/App.tsx` coordinates editing, execution history, snapshot selection, and canvas rendering. React does not evaluate AST nodes or mutate runtime values directly.
+- `src/core/visualization` converts runtime snapshots into renderer-safe state and draws that state with PixiJS.
+- `src/App.tsx` coordinates editing, execution history, step playback, snapshot selection, and the PixiJS stage. React does not evaluate AST nodes or mutate runtime values directly.
 - `src-tauri` provides the desktop shell. It is not part of the language runtime.
 
 The core is exported through `src/core/index.ts`, so application code can import the public language, runtime, interpreter, and visualization APIs from one module.
@@ -81,10 +81,11 @@ This is an intentionally small language, not a complete ECMAScript implementatio
 - `pause()` to request a paused status.
 - `reset()` to create a fresh runtime execution state.
 - `history` to expose immutable runtime snapshots captured during execution.
+- `steps` to expose the statement-level playback timeline.
 
 Each step emits a `STATEMENT` event, executes the statement, updates status, and records a snapshot. A runtime error changes the interpreter to `FAILED` and emits an `ERROR` event.
 
-Blocks, loops, and function bodies may execute several internal AST statements during one outer step. The public step/history API is stable while finer-grained continuation stepping can be added later.
+`execute()` records a step before every executable statement, including statements nested in blocks, loops, and function bodies. It does not record synthetic block delimiters. Loop conditions add one step per iteration, and the interpreter records a final step after completion or failure. The coarse outer `step()` API still advances top-level statement boundaries; the timeline is the finer-grained history used by the UI.
 
 The interpreter evaluates expressions against a `Scope`. Function calls create child scopes and call frames. Class methods can receive an instance receiver, which is exposed as `this`. Return, break, and continue use internal control-flow signals rather than JavaScript exceptions exposed to the user.
 
@@ -109,13 +110,14 @@ Built-ins currently include `console`, `Number`, `String`, and `Array`. Array me
 `src/core/runtime/Scope.ts` implements lexical bindings:
 
 - `define()` creates a binding in the current scope.
+- `defineBuiltin()` defines a host-provided binding such as `console`; built-ins are hidden from visualization and collapsed in the inspector.
 - `assign()` updates the nearest existing binding.
 - `defineOrAssign()` updates an existing binding or creates a new one.
 - `get()` resolves through parent scopes.
 - `entries()` returns variables owned by that scope.
 - Every scope has a stable environment ID and a parent reference.
 
-The runtime registers created scopes. This lets snapshots preserve globals, function environments, and block environments after a function returns. Retained environments support execution history and future timeline visualization.
+The runtime registers created scopes. This lets snapshots preserve globals, function environments, and block environments after a function returns. Block scopes are marked active only while they are executing and contain bindings, so the active-environment view shows the current loop/block variables without retaining empty block cards. Inactive scopes remain available in the inspector's all-environments view and in returned-frame history.
 
 ### Classes and runtime method registries
 
@@ -143,6 +145,19 @@ User-written language classes are represented by `ClassValue` and `InstanceValue
 - `globalEnvironmentId` for graph roots.
 
 Runtime snapshots copy mutable arrays and object fields, so React history can safely retain them. New mutable runtime value types must be added to `Runtime.copyValue()` to keep historical snapshots isolated.
+
+### Step timeline
+
+`Runtime` records two histories:
+
+- `snapshots` — every observable event, used for the execution trace and console output.
+- `steps` — one snapshot per executed statement, used by the step debugger and timeline.
+
+`Runtime.recordStep(location)` captures the environment *before* a statement executes and stores the statement's source location. The interpreter calls it for every executable statement, including statements nested inside blocks, loop bodies, and function bodies. Loop conditions record an additional step per iteration, so a `for` loop produces one timeline entry per pass rather than one entry for the whole loop.
+
+The interpreter also records an initial `READY` step at the first program statement and a final step after `PROGRAM_FINISHED` or `ERROR`. `Interpreter.steps` exposes the timeline; the first step is displayed before execution and the final step contains the completed program state.
+
+`App.tsx` treats the timeline as playback data. Play, pause, previous line, next line, and the timeline slider only move a cursor over already-recorded snapshots; they never re-execute or mutate runtime state. `stepForward()` runs the program on first use if the trace has not been built yet, then advances one statement at a time. The current snapshot's `currentLocation` drives the Monaco line decoration.
 
 ### Events
 
@@ -173,20 +188,24 @@ Events contain an optional source location and a payload of stable data. Payload
 - `VisualArray` objects with values and active indices.
 - `VisualInstance` objects with class names and fields.
 - `VisualObject` objects with generic properties.
-- `VisualStack` as a reserved discriminated type for future stack projection.
+- `VisualStack` for user classes named `Stack` whose `items` field is an array.
 
-The projector deduplicates referenced objects and recursively discovers nested arrays, instances, and objects. This keeps the renderer independent of `Runtime`, `Scope`, and AST classes.
+The projector deduplicates referenced objects and recursively discovers nested arrays, instances, and objects. This keeps the renderer independent of `Runtime`, `Scope`, and AST classes. Built-in host bindings are marked with `builtin: true` so the stage and inspector can hide `console`, `Number`, `String`, and `Array` without hiding user variables.
 
-`CanvasRenderer.ts` draws the projected state. It currently:
+`PixiRenderer.ts` owns a PixiJS `Application` and renders the projected state as a scene graph:
 
-- Draws the environment graph as variable cards.
-- Draws arrays and reserved stack objects.
-- Draws generic object and class-instance field panels.
-- Supports custom class renderers through `registerClassRenderer()`.
-- Maintains a viewport offset with `panBy()` and `resetView()`.
-- Draws the world inside a translated canvas context, allowing layouts larger than the visible canvas.
+- Environment cards show active scopes and their user bindings.
+- Arrays render as indexed tiles with active indices highlighted.
+- Stacks render top-first with the current top highlighted.
+- Instances and objects render as field panels.
+- The world container can be panned by dragging or with the wheel.
+- `resetView()` restores the viewport, and the stage's Fullscreen button expands the canvas host.
 
-`VisualizationStage.tsx` connects pointer dragging and wheel movement to `CanvasRenderer.panBy()`. Its Fit button calls `resetView()`. The renderer does not decide algorithm intent; it only draws the projection it receives.
+`VisualizationStage.tsx` creates the renderer asynchronously with `app.init()`, feeds it new `VisualizationState` objects after each step, and destroys the Pixi application on unmount. The renderer rebuilds its display list from the projection for each step, so it never reads scopes, call frames, or mutable runtime values.
+
+`CanvasRenderer.ts` remains available as a Canvas 2D fallback and as a reference for custom class renderers. `PixiRenderer.registerClassRenderer(className, callback)` is the PixiJS extension point; the callback receives a `PixiRenderContext` with the scene container and a text helper.
+
+The renderer does not decide algorithm intent; it only draws the projection it receives.
 
 ## Adding a new data structure
 
@@ -199,19 +218,20 @@ For a built-in computational structure:
 5. Add interpreter construction or builtin installation if the language needs a constructor.
 6. Emit structure-specific events such as `ENQUEUE`, `DEQUEUE`, `LINK`, or `ROTATE` if the UI needs them.
 7. Project the value into a discriminated visualization object.
-8. Register a specialized renderer with `CanvasRenderer.registerClassRenderer()` when generic fields are not enough.
+8. Register a specialized renderer with `PixiRenderer.registerClassRenderer()` when generic fields are not enough.
 
 For a user-written class, no runtime registry change is required for basic construction. The parser creates a `ClassDeclaration`, the interpreter creates a `ClassValue`, `new` creates an `InstanceValue`, and member access binds methods to the instance.
 
-Example renderer extension:
+Example PixiJS renderer extension:
 
 ```ts
 renderer.registerClassRenderer("Queue", (context, object, x, y, width, height) => {
-  // Draw queue-specific geometry using object.fields.
+  context.addText(object.label.toUpperCase(), x, y, { color: 0xd8f27a, bold: true });
+  // Add Graphics or Text nodes to context.container.
 });
 ```
 
-Keep custom renderers focused on drawing. Queue or linked-list mutation belongs in the runtime/interpreter layer.
+The Canvas 2D fallback exposes the same idea with `CanvasRenderer.registerClassRenderer()`. Keep custom renderers focused on drawing. Queue or linked-list mutation belongs in the runtime/interpreter layer.
 
 ## Adding a language feature
 
@@ -222,16 +242,16 @@ Keep custom renderers focused on drawing. Queue or linked-list mutation belongs 
 5. Emit events for observable operations.
 6. Ensure `Runtime.snapshot()` copies any new mutable value type.
 7. Extend `VisualizationState` only if the feature needs a visual projection.
-8. Add a runtime smoke test and run `npm run build`.
+8. Add a runtime smoke test and run `pnpm build`.
 
-Do not solve language behavior in the renderer or UI. Keep the dependency direction flowing from UI to core, not from core to React or Canvas.
+Do not solve language behavior in the renderer or UI. Keep the dependency direction flowing from UI to core, not from core to React or a specific rendering surface.
 
 ## Validation
 
 The application build is:
 
 ```powershell
-npm run build
+pnpm build
 ```
 
-A useful manual smoke program should include declarations, arrays, object fields, a user-defined class, method calls, and a mutation. Run it in the editor, inspect the runtime-state panel, use Previous/Next step, and drag or wheel the visualization when the projected world is larger than the canvas.
+A useful manual smoke program should include declarations, arrays, loops, object fields, a user-defined class, method calls, and a mutation. Run it in the editor, use Play or Next/Previous to advance one statement at a time, scrub the timeline, inspect the runtime-state and execution-trace panels, and drag or wheel the PixiJS visualization when the projected world is larger than the canvas.
