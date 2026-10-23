@@ -45,6 +45,7 @@ import {
   PrimitiveValue,
   RuntimeValue,
 } from "../runtime/Values";
+import { displayValue } from "../runtime/Values";
 import { Scope } from "../runtime/Scope";
 
 export enum InterpreterStatus {
@@ -746,6 +747,15 @@ export class Interpreter {
       return object.properties.get(name) ?? new PrimitiveValue(undefined);
     if (object instanceof ArrayValue && /^\d+$/.test(name))
       return object.read(Number(name));
+    if (
+      object instanceof PrimitiveValue &&
+      typeof object.value === "string"
+    ) {
+      const text = object.value;
+      if (name === "length") return new PrimitiveValue(text.length);
+      if (/^\d+$/.test(name) && Number(name) < text.length)
+        return new PrimitiveValue(text[Number(name)]);
+    }
     throw new Error(`Value has no member '${name}'.`);
   }
   private writeProperty(
@@ -786,7 +796,7 @@ export class Interpreter {
                   location: this.program.location,
                   payload: {
                     output: args
-                      .map((value) => this.primitive(value))
+                      .map((value) => this.formatOutput(value))
                       .join(" "),
                   },
                 });
@@ -824,6 +834,46 @@ export class Interpreter {
         () => new ArrayValue(`array-${++this.objectId}`, []),
       ),
     );
+    this.runtime.globals.defineBuiltin(
+      "Math",
+      new ObjectValue(
+        new Map<string, RuntimeValue>(
+          [
+            ["abs", (value: unknown) => Math.abs(Number(value))],
+            ["floor", (value: unknown) => Math.floor(Number(value))],
+            ["ceil", (value: unknown) => Math.ceil(Number(value))],
+            ["round", (value: unknown) => Math.round(Number(value))],
+            ["sqrt", (value: unknown) => Math.sqrt(Number(value))],
+            [
+              "min",
+              (...values: unknown[]) => Math.min(...values.map(Number)),
+            ],
+            [
+              "max",
+              (...values: unknown[]) => Math.max(...values.map(Number)),
+            ],
+          ].map(
+            ([name, implementation]) =>
+              [
+                name,
+                new FunctionValue(
+                  `Math.${name}`,
+                  [],
+                  this.program.location,
+                  (...args) =>
+                    new PrimitiveValue(
+                      (
+                        implementation as (
+                          ...values: unknown[]
+                        ) => number
+                      )(...args.map((value) => this.primitive(value))),
+                    ),
+                ),
+              ] as [string, RuntimeValue],
+          ),
+        ),
+      ),
+    );
   }
   private writeEvent(
     statement: Statement,
@@ -842,6 +892,11 @@ export class Interpreter {
   private primitive(value: RuntimeValue): unknown {
     if (value instanceof PrimitiveValue) return value.value;
     return value;
+  }
+  /** Console output formatting: primitives as-is, RuntimeObjects rendered. */
+  private formatOutput(value: RuntimeValue): string {
+    if (value instanceof PrimitiveValue) return String(value.value);
+    return displayValue(value);
   }
   private primitiveValue(
     value: RuntimeValue,

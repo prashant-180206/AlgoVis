@@ -82,7 +82,7 @@ export function CodeEditor({
           <span className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300">
             {fileName}
           </span>
-          <Badge className="border-lime-300/20 text-lime-300">JS-LIKE</Badge>
+          <Badge className="border-lime-300/20 text-lime-300">Visual JS</Badge>
         </div>
         <span className="font-mono text-[10px] text-zinc-600">
           {currentLine === undefined ? "READY" : `LINE ${currentLine}`}

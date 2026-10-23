@@ -146,7 +146,11 @@ export class Runtime {
       // visualization parent points at a caller frame instead.
       if (scope.parentScope && scope.parentScope !== environmentParent)
         collect(scope.parentScope);
-      const entries = scope.entries();
+      // `this` is implicit receiver plumbing for method frames; the instance
+      // itself is already visible as a data structure, so it stays internal.
+      const entries = scope
+        .entries()
+        .filter(([name]) => name !== "this");
       environments.set(scope.id, {
         id: scope.id,
         parentId: environmentParent?.id,
@@ -176,6 +180,7 @@ export class Runtime {
       callLocation: frame.callLocation,
       variables: frame.locals
         .entries()
+        .filter(([name]) => name !== "this")
         .map(([name, value]) =>
             this.describeVariable(frame.locals, name, value, valueCopies),
         ),

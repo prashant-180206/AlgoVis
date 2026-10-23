@@ -9,14 +9,10 @@ import {
   CirclePlay,
   FastForward,
   FileCode2,
-  Files,
   FolderOpen,
   Gauge,
-  RefreshCw,
   RotateCcw,
-  Save,
   Sparkles,
-  Terminal,
   X,
 } from "lucide-react";
 import {
@@ -36,6 +32,8 @@ import { BottomPanel } from "./components/BottomPanel";
 import { CodeEditor } from "./components/CodeEditor";
 import { EditorTabs } from "./components/EditorTabs";
 import { FileExplorer } from "./components/FileExplorer";
+import { Navbar } from "./components/Navbar";
+import { ActivityBar } from "./components/Sidebar";
 import { VisualizationStage } from "./components/VisualizationStage";
 import {
   ResizableHandle,
@@ -43,16 +41,15 @@ import {
   ResizablePanelGroup,
 } from "./components/ui/resizable";
 import { Button } from "./components/ui/button";
-import { Badge } from "./components/ui/badge";
 import {
   moduleDisplayName,
+  openDefaultDesktopWorkspace,
   openWorkspaceFromMachine,
   workspaceModuleId,
   workspaceModulePath,
   type WorkspaceNode,
   type WorkspaceProvider,
 } from "./workspace";
-import { cn } from "./lib/utils";
 import "./App.css";
 
 const VIRTUAL_FILE = "Algorithm.js";
@@ -435,35 +432,111 @@ function App() {
     setModuleReload((value) => value + 1);
   }
 
+  async function applyWorkspaceProvider(provider: WorkspaceProvider): Promise<void> {
+    const tree = await provider.readTree();
+    setWorkspace(provider);
+    setWorkspaceTree(tree);
+    setOpenFiles(new Map());
+    setDirtyPaths(new Set());
+    setActivePath(undefined);
+    setIsPlaying(false);
+    setSteps([]);
+    setStepCursor(0);
+    setSnapshot(undefined);
+    clearModuleCache();
+
+    const entry = findEntryFile(tree);
+    if (entry) {
+      const contents = await provider.readFile(entry.path);
+      setOpenFiles(new Map([[entry.path, contents]]));
+      setActivePath(entry.path);
+    }
+  }
+
+  /** Best-effort startup folder: `?workspace=`, else the project folder. */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const provider = await openDefaultDesktopWorkspace();
+        if (!provider || cancelled) return;
+        await applyWorkspaceProvider(provider);
+      } catch {
+        // Opening the default folder is optional; the starter file stays.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function openFolder(): Promise<void> {
     setWorkspaceLoading(true);
     setWorkspaceError(undefined);
     try {
       const provider = await openWorkspaceFromMachine();
       if (!provider) return;
-      const tree = await provider.readTree();
-      setWorkspace(provider);
-      setWorkspaceTree(tree);
-      setOpenFiles(new Map());
-      setDirtyPaths(new Set());
-      setActivePath(undefined);
-      setIsPlaying(false);
-      setSteps([]);
-      setStepCursor(0);
-      setSnapshot(undefined);
-      clearModuleCache();
-
-      const entry = findEntryFile(tree);
-      if (entry) {
-        const contents = await provider.readFile(entry.path);
-        setOpenFiles(new Map([[entry.path, contents]]));
-        setActivePath(entry.path);
-      }
+      await applyWorkspaceProvider(provider);
     } catch (error) {
       if (!isAbortError(error))
         setWorkspaceError(`Unable to open folder: ${errorMessage(error)}`);
     } finally {
       setWorkspaceLoading(false);
+    }
+  }
+
+  async function renameWorkspacePath(
+    oldPath: string,
+    newPath: string,
+  ): Promise<void> {
+    if (!workspace) return;
+    try {
+      await workspace.renamePath(oldPath, newPath);
+      setOpenFiles((current) => {
+        const contents = current.get(oldPath);
+        if (contents === undefined) return current;
+        const next = new Map(current);
+        next.delete(oldPath);
+        next.set(newPath, contents);
+        return next;
+      });
+      setDirtyPaths((current) => {
+        if (!current.has(oldPath)) return current;
+        const next = new Set(current);
+        next.delete(oldPath);
+        next.add(newPath);
+        return next;
+      });
+      if (activePath === oldPath) setActivePath(newPath);
+      clearModuleCache();
+      setWorkspaceTree(await workspace.readTree());
+      setWorkspaceError(undefined);
+    } catch (error) {
+      setWorkspaceError(`Unable to rename '${oldPath}': ${errorMessage(error)}`);
+    }
+  }
+
+  async function deleteWorkspacePath(path: string): Promise<void> {
+    if (!workspace) return;
+    try {
+      await workspace.deletePath(path);
+      const remaining = [...openFiles.keys()].filter((key) => key !== path);
+      setOpenFiles((current) => {
+        const next = new Map(current);
+        next.delete(path);
+        return next;
+      });
+      setDirtyPaths((current) => {
+        const next = new Set(current);
+        next.delete(path);
+        return next;
+      });
+      if (activePath === path) setActivePath(remaining[remaining.length - 1]);
+      clearModuleCache();
+      setWorkspaceTree(await workspace.readTree());
+      setWorkspaceError(undefined);
+    } catch (error) {
+      setWorkspaceError(`Unable to delete '${path}': ${errorMessage(error)}`);
     }
   }
 
@@ -503,6 +576,17 @@ function App() {
       await workspace.createFile(path);
       setWorkspaceTree(await workspace.readTree());
       await openWorkspaceFile(path);
+      setWorkspaceError(undefined);
+    } catch (error) {
+      setWorkspaceError(`Unable to create '${path}': ${errorMessage(error)}`);
+    }
+  }
+
+  async function createWorkspaceDirectory(path: string): Promise<void> {
+    if (!workspace) return;
+    try {
+      await workspace.createDirectory(path);
+      setWorkspaceTree(await workspace.readTree());
       setWorkspaceError(undefined);
     } catch (error) {
       setWorkspaceError(`Unable to create '${path}': ${errorMessage(error)}`);
@@ -738,129 +822,30 @@ function App() {
 
   return (
     <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#0d100e] text-zinc-100 selection:bg-lime-300/30">
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-white/8 bg-[#0e110e] px-3">
-        <div className="flex shrink-0 items-center gap-2.5">
-          <div className="grid h-7 w-7 place-items-center rounded bg-lime-300 text-[10px] font-black text-[#10140f] shadow-[0_0_20px_rgba(216,242,122,.15)]">
-            AV
-          </div>
-          <div className="flex items-baseline gap-2">
-            <strong className="text-xs font-semibold tracking-tight">AlgoVis</strong>
-            <Badge className="hidden border-lime-300/20 text-lime-300 sm:inline-flex">
-              IDE
-            </Badge>
-          </div>
-        </div>
-
-        <div className="hidden min-w-0 items-center gap-2 border-l border-white/8 pl-3 md:flex">
-          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
-          <span
-            className="truncate font-mono text-[10px] text-zinc-500"
-            title={workspace?.root}
-          >
-            {workspace?.root ?? "No folder opened"}
-          </span>
-        </div>
-
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <span className="hidden items-center gap-2 px-2 text-[9px] uppercase tracking-[0.14em] text-zinc-600 sm:flex">
-            <i
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                parsed.error
-                  ? "bg-red-300"
-                  : isPlaying
-                    ? "bg-lime-300 shadow-[0_0_8px_#d8f27a]"
-                    : "bg-zinc-600",
-              )}
-            />
-            {playbackStatus}
-          </span>
-          {imports.length > 0 ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={reloadModules}
-              disabled={loadingModules}
-              aria-label="Reload imported modules"
-              title="Reload imported modules"
-            >
-              <RefreshCw
-                className={`h-3.5 w-3.5 ${loadingModules ? "animate-spin" : ""}`}
-              />
-            </Button>
-          ) : null}
-          <Button
-            size="sm"
-            onClick={() => void openFolder()}
-            disabled={workspaceLoading}
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-            Open folder
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => void saveActiveFile()}
-            disabled={!canSave}
-            title="Save file (Ctrl+S)"
-          >
-            <Save className="h-3.5 w-3.5" />
-            Save
-          </Button>
-        </div>
-      </header>
+      <Navbar
+        workspaceRoot={workspace?.root}
+        playbackStatus={playbackStatus}
+        hasParseError={Boolean(parsed.error)}
+        isPlaying={isPlaying}
+        hasImports={imports.length > 0}
+        loadingModules={loadingModules}
+        canSave={canSave}
+        workspaceLoading={workspaceLoading}
+        onReloadModules={reloadModules}
+        onOpenFolder={() => void openFolder()}
+        onSaveFile={() => void saveActiveFile()}
+      />
 
       <div className="flex min-h-0 flex-1">
-        <nav className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-white/8 bg-[#0c0f0c] py-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-8 w-8",
-              sidebarOpen && "bg-lime-300/10 text-lime-300",
-            )}
-            onClick={() => setSidebarOpen((value) => !value)}
-            aria-label="Toggle file explorer"
-            title="File explorer"
-          >
-            <Files className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => void openFolder()}
-            aria-label="Open folder"
-            title="Open folder"
-          >
-            <FolderOpen className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-8 w-8",
-              !visCollapsed && "bg-lime-300/10 text-lime-300",
-            )}
-            onClick={() => setVisCollapsed((value) => !value)}
-            aria-label="Toggle visualization"
-            title={visCollapsed ? "Show visualization" : "Hide visualization"}
-          >
-            <Boxes className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-8 w-8",
-              bottomOpen && "bg-lime-300/10 text-lime-300",
-            )}
-            onClick={() => setBottomOpen((value) => !value)}
-            aria-label="Toggle bottom panel"
-            title="Runtime, output, and problems"
-          >
-            <Terminal className="h-4 w-4" />
-          </Button>
-        </nav>
+        <ActivityBar
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen((value) => !value)}
+          visCollapsed={visCollapsed}
+          onToggleVisualization={() => setVisCollapsed((value) => !value)}
+          bottomOpen={bottomOpen}
+          onToggleBottomPanel={() => setBottomOpen((value) => !value)}
+          onOpenFolder={() => void openFolder()}
+        />
 
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
           <ResizablePanel
@@ -880,7 +865,10 @@ function App() {
               onOpenFile={(path) => void openWorkspaceFile(path)}
               onRefresh={() => void refreshWorkspace()}
               onCreateFile={createWorkspaceFile}
+              onCreateFolder={createWorkspaceDirectory}
               onOpenFolder={() => void openFolder()}
+              onRenameFile={renameWorkspacePath}
+              onDeleteFile={deleteWorkspacePath}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />
@@ -900,7 +888,7 @@ function App() {
           />
 
           {workspaceError ? (
-            <div className="flex shrink-0 items-center gap-2 border-b border-red-400/20 bg-red-400/[0.05] px-3 py-1.5 text-[11px] text-red-300">
+            <div className="flex shrink-0 items-center gap-2 border-b border-red-400/20 bg-red-400/5 px-3 py-1.5 text-[11px] text-red-300">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 flex-1 truncate" title={workspaceError}>
                 {workspaceError}

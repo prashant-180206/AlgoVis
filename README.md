@@ -83,6 +83,8 @@ The canvas supports:
 
 `src/core/visualization/PixiRenderer.ts` builds the PixiJS scene graph from the projected state. It does not read scopes or runtime values directly. `CanvasRenderer.ts` is retained as a flat Canvas 2D fallback. `VisualizationStage` accepts an optional `configureRenderer` callback so class-specific Pixi renderers can be registered during initialization.
 
+Well-known data-structure classes are visualized purely by class name through `src/core/visualization/ClassVisualizers.ts` — no interpreter built-ins or script registration needed. `Stack` (any casing) renders LIFO tiles with a TOP marker, `Queue`/`Deque` render front/rear tiles, `LinkedList`/`List` renders a node chain by reconstructing it from projected path labels (`<list>.head.next…`), `Heap`/`MinHeap`/`MaxHeap`/`PriorityQueue` render the backing array as a indexed tree, `Tree`/`BST`/`BinarySearchTree` renders an in-order binary tree layout from `<tree>.root.left…` paths, and `ListNode`/`TreeNode`/`Graph` have dedicated cards. Nested objects belonging to such an instance (its `items` array, its `root` nodes) are absorbed into the class card instead of being drawn as duplicate tiles. `VisualizationStage` registers these defaults before calling `configureRenderer`, so custom registrations can override any name. When the drawn content is taller or wider than the stage, the world is scaled to fit both axes; manual panning is preserved until the fit view button is used.
+
 ### 5. Runtime inspector
 
 `src/components/RuntimeInspector.tsx` displays the runtime snapshot independently from the PixiJS stage.
@@ -299,6 +301,8 @@ console.log("top", top, "total", total);
 ```
 
 `public/modules/structures.js` also provides `Queue`, `ListNode`, `LinkedList`, and `TreeNode` as examples for custom data-structure programs.
+
+The desktop app also ships a folder-wise example library: every example is a real `.js` file under `src/examples/` (grouped by concept — sorting, stacks & queues, linked lists, trees, graphs, dynamic programming, backtracking, math/matrix/vector), bundled with Vite's `?raw` import and exported by `src/examples/index.ts`. On startup it writes them as real `.js` files (paths keep their folder structure) into the app's AppData `examples` folder (`ensure_examples_dir` in `src-tauri/src/lib.rs`) and opens that folder as the default workspace, so every app user starts with a browsable, editable example tree. Files already on disk are preserved so user edits survive app updates. Classes are visualized by name — a `class Stack` renders as a stack card, `class MinHeap` as a heap tree, `class Graph` as a polygon of nodes and edges, `class Matrix` as a grid — via the registry in `src/core/visualization/ClassVisualizers.ts`; the interpreter has no data-structure builtins. Cards are sized to their content, wrap into rows instead of stretching into wide rectangles, and nested parts (a stack's items array, a graph's adjacency lists, matrix rows) are absorbed into their class card instead of taking up extra canvas space.
 
 ## Development conventions
 

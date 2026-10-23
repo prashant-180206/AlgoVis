@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Activity, Maximize2, ScanLine } from "lucide-react";
-import { PixiRenderer, type VisualizationState } from "../core";
+import {
+  defaultClassRenderers,
+  PixiRenderer,
+  type VisualizationState,
+} from "../core";
 import { Card, CardHeader } from "./ui/card";
 import { Button } from "./ui/button";
 
@@ -32,6 +36,11 @@ export function VisualizationStage({
     let cancelled = false;
     const renderer = new PixiRenderer();
     rendererRef.current = renderer;
+    // Data-structure classes are visualized purely by their class name, so
+    // scripts need no builtins or registration of their own.
+    Object.entries(defaultClassRenderers).forEach(([className, renderer$]) =>
+      renderer.registerClassRenderer(className, renderer$),
+    );
     latestConfigure.current?.(renderer);
     void renderer
       .init(host)
@@ -53,14 +62,6 @@ export function VisualizationStage({
   useEffect(() => {
     if (ready) rendererRef.current?.render(visualization);
   }, [ready, visualization]);
-
-  const hasUserState =
-    visualization.objects.length > 0 ||
-    visualization.environments.some(
-      (environment) =>
-        environment.active &&
-        environment.variables.some((variable) => !variable.builtin),
-    );
 
   function toggleFullscreen(): void {
     const host = hostRef.current;
@@ -111,19 +112,7 @@ export function VisualizationStage({
             starting pixi renderer
           </div>
         ) : null}
-        {ready && !hasUserState ? (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center">
-            <div className="grid h-14 w-14 place-items-center rounded-lg border border-dashed border-lime-300/30 text-lime-300">
-              <Activity className="h-6 w-6" />
-            </div>
-            <strong className="text-sm font-medium text-zinc-300">
-              Awaiting execution
-            </strong>
-            <span className="max-w-57.5 text-xs leading-5 text-zinc-600">
-              Run the algorithm to see its data structures take shape.
-            </span>
-          </div>
-        ) : null}
+      
       </div>
       <div className="flex shrink-0 items-center justify-between border-t border-white/8 px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-zinc-600">
         <span>Environment projection</span>

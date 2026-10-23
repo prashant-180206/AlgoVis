@@ -11,6 +11,7 @@ import type {
   VisualVariable,
   VisualizationState,
 } from "./VisualizationState";
+import { classCardHeight } from "./ClassVisualizers";
 
 const FONT_FAMILY = "DM Mono, IBM Plex Mono, monospace";
 
@@ -55,6 +56,8 @@ export interface PixiTextOptions {
 
 export interface PixiRenderContext {
   readonly container: Container;
+  /** Every projected object node, so class renderers can pull nested arrays. */
+  readonly objects: readonly VisualObjectNode[];
   addText: (
     value: string,
     x: number,
@@ -91,12 +94,15 @@ export class PixiRenderer {
   private destroyed = false;
   private dragging = false;
   private lastPointer?: Point;
+  private viewTouched = false;
 
   public registerClassRenderer(
     className: string,
     renderer: SpecialPixiInstanceRenderer,
   ): void {
-    this.specialRenderers.set(className, renderer);
+    // Class names arrive in any casing (Stack vs stack), so lookup keys are
+    // normalized to lowercase once, at registration and lookup time.
+    this.specialRenderers.set(className.toLowerCase(), renderer);
   }
 
   public async init(host: HTMLElement): Promise<void> {
@@ -138,16 +144,56 @@ export class PixiRenderer {
   public render(state: VisualizationState): void {
     this.state = state;
     this.draw();
+    if (!this.viewTouched) this.fitToView();
+  }
+
+  /** Labels nested under a special-rendered instance, drawn inside its card. */
+  private absorbedNestedPrefixes(): readonly string[] {
+    const special = this.specialRenderers;
+    return this.state?.objects
+      .filter(
+        (object) =>
+          object.type === "instance" &&
+          special.has(object.className.toLowerCase()),
+      )
+      .map((object) => `${object.label}.`) ?? [];
   }
 
   public panBy(deltaX: number, deltaY: number): void {
+    this.viewTouched = true;
     this.world.x += deltaX;
     this.world.y += deltaY;
   }
 
   public resetView(): void {
-    this.world.position.set(0, 0);
-    this.draw();
+    this.viewTouched = false;
+    this.fitToView();
+  }
+
+  /**
+   * Scale and translate the world so the drawn content fits the visible
+   * canvas on both axes. Users retain free panning; any manual pan marks the
+   * view as "touched" so drawing new steps stops fighting their view.
+   */
+  private fitToView(): void {
+    if (!this.app) return;
+    const width = Math.max(1, this.app.screen.width);
+    const height = Math.max(1, this.app.screen.height);
+    const bounds = this.content.getLocalBounds();
+    const contentWidth = Math.max(1, bounds.width);
+    const contentHeight = Math.max(1, bounds.height);
+    const margin = 26;
+    const scale = Math.min(
+      (width - margin * 2) / contentWidth,
+      (height - margin * 2) / contentHeight,
+      1,
+    );
+    const clamped = Math.max(0.05, scale);
+    this.world.scale.set(clamped);
+    this.world.x =
+      (width - contentWidth * clamped) / 2 - bounds.x * clamped;
+    this.world.y =
+      (height - contentHeight * clamped) / 2 - bounds.y * clamped;
   }
 
   public destroy(): void {
@@ -173,6 +219,7 @@ export class PixiRenderer {
     const height = Math.max(1, Math.floor(this.host.clientHeight));
     this.app.renderer.resize(width, height);
     this.draw();
+    if (!this.viewTouched) this.fitToView();
   }
 
   private draw(): void {
@@ -198,22 +245,55 @@ export class PixiRenderer {
         bold: true,
       });
       y += 20;
-      const columns = Math.max(1, Math.floor((width - 48) / 430));
-      const gap = 16;
-      const cardWidth = (width - 48 - (columns - 1) * gap) / columns;
-      const rowHeight = 190;
-      this.state.objects.forEach((object, index) => {
-        const column = index % columns;
-        const row = Math.floor(index / columns);
-        this.drawObject(
-          object,
-          24 + column * (cardWidth + gap),
-          y + row * rowHeight,
-          cardWidth,
-          176,
-        );
-      });
-      y += Math.ceil(this.state.objects.length / columns) * rowHeight;
+      // Children of a specially visualized instance (say a stack's items
+      // array) live inside that instance's card, so they are not repeated
+      // as standalone tiles beneath it.
+      const absorbed = this.absorbedNestedPrefixes();
+      const drawable = this.state.objects.filter(
+        (object) =>
+          !absorbed.some((prefix) => object.label.startsWith(prefix)),
+      );
+      // Cards wrap into rows instead of stretching into oversized
+      // rectangles on wide canvases.
+      const cardGap = 16;
+      const rowGap = 18;
+      const available = width - 48;
+      const maxCardWidth = 470;
+      const columns = Math.max(
+        1,
+        Math.floor((available + cardGap) / (maxCardWidth + cardGap)),
+      );
+      const cardWidth = Math.min(
+        maxCardWidth,
+        Math.floor((available - (columns - 1) * cardGap) / columns),
+      );
+      const heightOf = (object: (typeof drawable)[number]): number =>
+        object.type === "array"
+          ? 92
+          : object.type === "object"
+            ? Math.max(
+                90,
+                Math.min(300, 46 + object.fields.length * 22),
+              )
+            : classCardHeight(object, this.state?.objects ?? []);
+      let yCursor = y;
+      for (let offset = 0; offset < drawable.length; offset += columns) {
+        const row = drawable.slice(offset, offset + columns);
+        const rowHeight = Math.max(...row.map(heightOf));
+        const rowWidth = row.length * cardWidth + (row.length - 1) * cardGap;
+        const startX = 24 + Math.max(0, (available - rowWidth) / 2);
+        row.forEach((object, index) => {
+          this.drawObject(
+            object,
+            startX + Math.round(index * (cardWidth + cardGap)),
+            yCursor,
+            cardWidth,
+            rowHeight,
+          );
+        });
+        yCursor += rowHeight + rowGap;
+      }
+      y = yCursor;
     }
     if (forest.length === 0 && this.state.objects.length === 0) {
       this.addText(
@@ -404,11 +484,14 @@ export class PixiRenderer {
     if (object.type === "array")
       this.drawArray(object, x, y, width, height);
     else if (object.type === "instance") {
-      const specialRenderer = this.specialRenderers.get(object.className);
+      const specialRenderer = this.specialRenderers.get(
+        object.className.toLowerCase(),
+      );
       if (specialRenderer) {
         specialRenderer(
           {
             container: this.content,
+            objects: this.state?.objects ?? [],
             addText: (value, textX, textY, options) =>
               this.addText(value, textX, textY, options),
           },

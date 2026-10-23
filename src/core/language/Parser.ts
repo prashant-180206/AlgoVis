@@ -316,6 +316,7 @@ export class Parser {
       this.skipNewlines();
     }
     this.consume(TokenType.RightParen, "Expected ')' after parameters.");
+    this.skipNewlines();
     this.consume(TokenType.LeftBrace, "Expected '{' before function body.");
     const body = this.block(this.previous());
     return new FunctionDeclaration(
@@ -327,6 +328,7 @@ export class Parser {
   }
   private classDeclaration(keyword: Token): Statement {
     const name = this.consume(TokenType.Identifier, "Expected a class name.");
+    this.skipNewlines();
     this.consume(TokenType.LeftBrace, "Expected '{' before class body.");
     const methods: FunctionDeclaration[] = [];
     this.skipSeparators();
@@ -348,6 +350,7 @@ export class Parser {
         TokenType.RightParen,
         "Expected ')' after method parameters.",
       );
+      this.skipNewlines();
       this.consume(TokenType.LeftBrace, "Expected '{' before method body.");
       const body = this.block(this.previous());
       methods.push(
@@ -374,10 +377,14 @@ export class Parser {
     this.consume(TokenType.LeftParen, "Expected '(' after 'if'.");
     const condition = this.expression();
     this.consume(TokenType.RightParen, "Expected ')' after condition.");
+    this.skipNewlines();
     const thenBranch = this.statement();
-    const elseBranch = this.match(TokenType.Else)
-      ? this.statement()
-      : undefined;
+    let elseBranch: Statement | undefined;
+    this.skipSeparators();
+    if (this.match(TokenType.Else)) {
+      this.skipNewlines();
+      elseBranch = this.statement();
+    }
     return new IfStatement(
       this.join(keyword.location, (elseBranch ?? thenBranch).location),
       condition,
@@ -389,6 +396,7 @@ export class Parser {
     this.consume(TokenType.LeftParen, "Expected '(' after 'while'.");
     const condition = this.expression();
     this.consume(TokenType.RightParen, "Expected ')' after condition.");
+    this.skipNewlines();
     const body = this.statement();
     return new WhileStatement(
       this.join(keyword.location, body.location),
@@ -412,6 +420,7 @@ export class Parser {
       ? undefined
       : this.expression();
     this.consume(TokenType.RightParen, "Expected ')' after for clauses.");
+    this.skipNewlines();
     const body = this.statement();
     return new ForStatement(
       this.join(keyword.location, body.location),

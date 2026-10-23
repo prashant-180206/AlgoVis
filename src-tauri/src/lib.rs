@@ -162,23 +162,134 @@ fn open_workspace(
 ) -> Result<WorkspaceInfo, String> {
     let canonical = fs::canonicalize(&root)
         .map_err(|error| format!("Unable to open '{}': {error}", root))?;
+    open_workspace_at(&canonical, state)
+}
+
+fn open_workspace_at(
+    canonical: &Path,
+    state: State<'_, WorkspaceState>,
+) -> Result<WorkspaceInfo, String> {
     if !canonical.is_dir() {
         return Err(format!("'{}' is not a folder.", canonical.display()));
     }
-    let tree = build_entry(&canonical, &canonical, 0)?;
-    let name = path_name(&canonical, true);
+    let tree = build_entry(canonical, canonical, 0)?;
+    let name = path_name(canonical, true);
     {
         let mut guard = state
             .0
             .lock()
             .map_err(|_| "The workspace state is unavailable.".to_string())?;
-        *guard = Some(canonical.clone());
+        *guard = Some(canonical.to_path_buf());
     }
     Ok(WorkspaceInfo {
         root: canonical.to_string_lossy().to_string(),
         name,
         tree,
     })
+}
+
+/// Opens the workspace folder on startup. `appdata/` inside the project is
+/// preferred so only algorithm files are shown; otherwise the project root
+/// the desktop app was launched from is used.
+#[tauri::command]
+fn default_workspace(state: State<'_, WorkspaceState>) -> Result<WorkspaceInfo, String> {
+    let exe = std::env::current_exe()
+        .map_err(|error| format!("Unable to locate the app: {error}"))?;
+    let mut dir = exe.parent();
+    while let Some(current) = dir {
+        if current.join("package.json").is_file() && current.join("src").is_dir() {
+            let appdata = current.join("appdata");
+            return match fs::canonicalize(&appdata) {
+                Ok(folder) if folder.is_dir() => open_workspace_at(&folder, state),
+                _ => open_workspace_at(current, state),
+            };
+        }
+        dir = current.parent();
+    }
+    Err("No default project folder was found.".to_string())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExampleFile {
+    name: String,
+    contents: String,
+}
+
+fn valid_example_name(name: &str) -> bool {
+    name.len() <= 96
+        && name.ends_with(".js")
+        && name
+            .split('/')
+            .all(|segment| valid_example_segment(segment))
+        && !name.contains("..")
+}
+
+/// A single path segment of an example file name, e.g. `04-trees`.
+fn valid_example_segment(segment: &str) -> bool {
+    !segment.is_empty()
+        && !segment.starts_with('.')
+        && segment
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+}
+
+/// Materializes the bundled example scripts inside the app's AppData folder
+/// and opens that folder as the workspace, so every app user starts with the
+/// examples ready to browse in the file tree. Names may carry folder paths
+/// (e.g. "04-trees/02-min-heap.js"); intermediate folders are created.
+/// Existing files are preserved so user edits survive app updates; empty
+/// leftovers are rewritten.
+#[tauri::command]
+fn ensure_examples_dir(
+    app: tauri::AppHandle,
+    files: Vec<ExampleFile>,
+    state: State<'_, WorkspaceState>,
+) -> Result<WorkspaceInfo, String> {
+    use tauri::Manager;
+
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Unable to resolve AppData: {error}"))?;
+    let examples_dir = data_dir.join("AlgoVis").join("examples");
+    fs::create_dir_all(&examples_dir)
+        .map_err(|error| format!("Unable to create '{}': {error}", examples_dir.display()))?;
+
+    for file in files {
+        if !valid_example_name(&file.name) {
+            continue;
+        }
+        let target = examples_dir.join(&file.name);
+        let Some(parent) = target.parent() else {
+            continue;
+        };
+        if !parent.starts_with(&examples_dir) {
+            continue;
+        }
+        fs::create_dir_all(parent).map_err(|error| {
+            format!("Unable to create '{}': {error}", parent.display())
+        })?;
+        let stale = fs::read_to_string(&target)
+            .map(|existing| existing.trim().is_empty())
+            .unwrap_or(true);
+        if stale {
+            fs::write(&target, &file.contents).map_err(|error| {
+                format!("Unable to write '{}': {error}", target.display())
+            })?;
+        }
+    }
+
+    let written = fs::read_dir(&examples_dir)
+        .map(|entries| entries.flatten().count())
+        .unwrap_or(0);
+    if written == 0 {
+        return Err("No example scripts could be written.".to_string());
+    }
+
+    let canonical = fs::canonicalize(&examples_dir)
+        .map_err(|error| format!("Unable to open '{}': {error}", examples_dir.display()))?;
+    open_workspace_at(&canonical, state)
 }
 
 #[tauri::command]
@@ -257,6 +368,28 @@ fn delete_workspace_path(
     }
 }
 
+#[tauri::command]
+fn rename_workspace_path(
+    old_path: String,
+    new_path: String,
+    state: State<'_, WorkspaceState>,
+) -> Result<(), String> {
+    let resolved_from = resolve_workspace_path(&state, &old_path)?;
+    let resolved_to = resolve_workspace_path(&state, &new_path)?;
+    if !resolved_from.exists() {
+        return Err(format!("Unable to find '{}'.", old_path));
+    }
+    if resolved_to.exists() {
+        return Err(format!("'{}' already exists.", new_path));
+    }
+    if let Some(parent) = resolved_to.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Unable to create '{}': {error}", new_path))?;
+    }
+    fs::rename(&resolved_from, &resolved_to)
+        .map_err(|error| format!("Unable to rename '{}': {error}", old_path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -265,12 +398,15 @@ pub fn run() {
         .manage(WorkspaceState::default())
         .invoke_handler(tauri::generate_handler![
             open_workspace,
+            default_workspace,
+            ensure_examples_dir,
             workspace_tree,
             read_workspace_file,
             write_workspace_file,
             create_workspace_file,
             create_workspace_directory,
-            delete_workspace_path
+            delete_workspace_path,
+            rename_workspace_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -9,7 +9,10 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  FolderPlus,
+  Pencil,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import type { WorkspaceNode } from "../workspace";
@@ -24,7 +27,10 @@ interface FileExplorerProps {
   onOpenFile: (path: string) => void;
   onRefresh: () => void;
   onCreateFile: (path: string) => Promise<void>;
+  onCreateFolder: (path: string) => Promise<void>;
   onOpenFolder: () => void;
+  onRenameFile: (oldPath: string, newPath: string) => Promise<void>;
+  onDeleteFile: (path: string) => Promise<void>;
 }
 
 function fileIcon(name: string) {
@@ -45,6 +51,8 @@ interface TreeRowProps {
   collapsed: ReadonlySet<string>;
   onToggle: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onRename: (node: WorkspaceNode) => void;
+  onDelete: (node: WorkspaceNode) => void;
 }
 
 function TreeRow({
@@ -55,6 +63,8 @@ function TreeRow({
   collapsed,
   onToggle,
   onOpenFile,
+  onRename,
+  onDelete,
 }: TreeRowProps) {
   const isDirectory = node.kind === "directory";
   const isCollapsed = collapsed.has(node.path);
@@ -63,42 +73,72 @@ function TreeRow({
 
   return (
     <div>
-      <button
+      <div
         className={cn(
-          "group flex h-7 w-full items-center gap-1.5 border-l-2 border-transparent pr-2 text-left text-xs text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-200",
+          "group relative flex h-7 w-full items-center gap-1.5 border-l-2 border-transparent pr-2 text-left text-xs text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-200",
           isActive &&
-            "border-lime-300 bg-lime-300/[0.09] text-zinc-100 hover:bg-lime-300/[0.12]",
+            "border-lime-300 bg-lime-300/9 text-zinc-100 hover:bg-lime-300/12",
         )}
         style={{ paddingLeft: `${6 + depth * 12}px` }}
-        onClick={() =>
-          isDirectory ? onToggle(node.path) : onOpenFile(node.path)
-        }
-        title={node.path || node.name}
-        type="button"
       >
-        {isDirectory ? (
-          isCollapsed ? (
-            <ChevronRight className="h-3 w-3 shrink-0 text-zinc-600" />
+        <button
+          className="flex h-7 min-w-0 flex-1 items-center gap-1.5"
+          onClick={() =>
+            isDirectory ? onToggle(node.path) : onOpenFile(node.path)
+          }
+          title={node.path || node.name}
+          type="button"
+        >
+          {isDirectory ? (
+            isCollapsed ? (
+              <ChevronRight className="h-3 w-3 shrink-0 text-zinc-600" />
+            ) : (
+              <ChevronDown className="h-3 w-3 shrink-0 text-zinc-600" />
+            )
           ) : (
-            <ChevronDown className="h-3 w-3 shrink-0 text-zinc-600" />
-          )
-        ) : (
-          <span className="w-3 shrink-0" />
-        )}
-        {isDirectory ? (
-          isCollapsed ? (
-            <Folder className="h-3.5 w-3.5 shrink-0 text-lime-300/80" />
+            <span className="w-3 shrink-0" />
+          )}
+          {isDirectory ? (
+            isCollapsed ? (
+              <Folder className="h-3.5 w-3.5 shrink-0 text-lime-300/80" />
+            ) : (
+              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-lime-300/80" />
+            )
           ) : (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-lime-300/80" />
-          )
-        ) : (
-          fileIcon(node.name)
-        )}
-        <span className="truncate">{node.name}</span>
-        {isDirty ? (
-          <i className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-lime-300" />
-        ) : null}
-      </button>
+            fileIcon(node.name)
+          )}
+          <span className="truncate">{node.name}</span>
+          {isDirty ? (
+            <i className="ml-1 h-1.5 w-1.5 shrink-0 rounded-full bg-lime-300" />
+          ) : null}
+        </button>
+        <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+          <button
+            className="rounded p-1 text-zinc-500 hover:bg-white/10 hover:text-zinc-200"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRename(node);
+            }}
+            aria-label={`Rename ${node.name}`}
+            title={`Rename ${node.name}`}
+            type="button"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+          <button
+            className="rounded p-1 text-zinc-500 hover:bg-red-400/10 hover:text-red-300"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(node);
+            }}
+            aria-label={`Delete ${node.name}`}
+            title={`Delete ${node.name}`}
+            type="button"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </span>
+      </div>
       {isDirectory && !isCollapsed
         ? node.children?.map((child) => (
             <TreeRow
@@ -110,11 +150,20 @@ function TreeRow({
               collapsed={collapsed}
               onToggle={onToggle}
               onOpenFile={onOpenFile}
+              onRename={onRename}
+              onDelete={onDelete}
             />
           ))
         : null}
     </div>
   );
+}
+
+/** Splits a workspace path into its parent directory and final segment. */
+function splitPath(path: string): { parent: string; name: string } {
+  const segments = path.split("/").filter(Boolean);
+  const name = segments.pop() ?? "";
+  return { parent: segments.join("/"), name };
 }
 
 export function FileExplorer({
@@ -126,12 +175,15 @@ export function FileExplorer({
   onOpenFile,
   onRefresh,
   onCreateFile,
+  onCreateFolder,
   onOpenFolder,
+  onRenameFile,
+  onDeleteFile,
 }: FileExplorerProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const [creating, setCreating] = useState(false);
-  const [newFileName, setNewFileName] = useState("");
-  const [creatingFile, setCreatingFile] = useState(false);
+  const [creating, setCreating] = useState<"file" | "folder" | undefined>();
+  const [newEntryName, setNewEntryName] = useState("");
+  const [creatingEntry, setCreatingEntry] = useState(false);
 
   function toggle(path: string): void {
     setCollapsed((current) => {
@@ -142,17 +194,46 @@ export function FileExplorer({
     });
   }
 
-  async function submitNewFile(): Promise<void> {
-    const path = newFileName.trim().replace(/^[/\\]+/, "");
-    if (!path || creatingFile) return;
-    setCreatingFile(true);
+  async function submitNewEntry(): Promise<void> {
+    const path = newEntryName.trim().replace(/^[/\\]+/, "").replace(/[/\\]+$/, "");
+    if (!path || creatingEntry) return;
+    setCreatingEntry(true);
     try {
-      await onCreateFile(path);
-      setNewFileName("");
-      setCreating(false);
+      if (creating === "folder") await onCreateFolder(path);
+      else await onCreateFile(path);
+      if (creating === "folder") {
+        setCollapsed((current) => {
+          const parent = splitPath(path).parent;
+          if (!parent || current.has(parent)) return current;
+          const next = new Set(current);
+          next.delete(parent);
+          return next;
+        });
+      }
+      setNewEntryName("");
+      setCreating(undefined);
     } finally {
-      setCreatingFile(false);
+      setCreatingEntry(false);
     }
+  }
+
+  function renameNode(node: WorkspaceNode): void {
+    const { parent } = splitPath(node.path);
+    const nextName = window.prompt(`Rename '${node.name}'`, node.name)?.trim();
+    if (!nextName || nextName === node.name) return;
+    if (/[\\/]$/.test(nextName) || nextName.includes("\0")) return;
+    const newPath = parent ? `${parent}/${nextName}` : nextName;
+    void onRenameFile(node.path, newPath);
+  }
+
+  function deleteNode(node: WorkspaceNode): void {
+    if (
+      !window.confirm(
+        `Delete '${node.name}'${node.kind === "directory" ? " and everything inside it" : ""}? This cannot be undone.`,
+      )
+    )
+      return;
+    void onDeleteFile(node.path);
   }
 
   return (
@@ -165,12 +246,29 @@ export function FileExplorer({
           variant="ghost"
           size="icon"
           className="h-7 w-7"
-          onClick={() => setCreating((value) => !value)}
+          onClick={() => {
+            setCreating((value) => (value === "file" ? undefined : "file"));
+            setNewEntryName("");
+          }}
           disabled={!tree}
           aria-label="New file"
           title="New file"
         >
           <FilePlus2 className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => {
+            setCreating((value) => (value === "folder" ? undefined : "folder"));
+            setNewEntryName("");
+          }}
+          disabled={!tree}
+          aria-label="New folder"
+          title="New folder"
+        >
+          <FolderPlus className="h-3.5 w-3.5" />
         </Button>
         <Button
           variant="ghost"
@@ -202,18 +300,21 @@ export function FileExplorer({
           <input
             autoFocus
             className="h-7 w-full rounded border border-lime-300/30 bg-[#171b18] px-2 font-mono text-[11px] text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-lime-300/60"
-            placeholder="path/to/file.js"
-            value={newFileName}
-            onChange={(event) => setNewFileName(event.target.value)}
+            placeholder={creating === "folder" ? "path/to/folder" : "path/to/file.js"}
+            value={newEntryName}
+            onChange={(event) => setNewEntryName(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") void submitNewFile();
+              if (event.key === "Enter") void submitNewEntry();
               if (event.key === "Escape") {
-                setCreating(false);
-                setNewFileName("");
+                setCreating(undefined);
+                setNewEntryName("");
               }
             }}
-            disabled={creatingFile}
+            disabled={creatingEntry}
           />
+          <span className="mt-1 block px-1 text-[9px] uppercase tracking-wider text-zinc-600">
+            creating {creating} · Enter to confirm, Esc to cancel
+          </span>
         </div>
       ) : null}
 
@@ -230,6 +331,8 @@ export function FileExplorer({
                 collapsed={collapsed}
                 onToggle={toggle}
                 onOpenFile={onOpenFile}
+                onRename={renameNode}
+                onDelete={deleteNode}
               />
             ))
           ) : (

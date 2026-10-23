@@ -11,6 +11,7 @@ export * from "./runtime/RuntimeClass";
 export * from "./runtime/Scope";
 export * from "./runtime/Values";
 export * from "./visualization/CanvasRenderer";
+export * from "./visualization/ClassVisualizers";
 export * from "./visualization/EnvironmentTree";
 export * from "./visualization/PixiRenderer";
 export * from "./visualization/VisualizationState";

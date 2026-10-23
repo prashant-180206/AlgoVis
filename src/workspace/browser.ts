@@ -106,6 +106,84 @@ class BrowserWorkspaceProvider implements WorkspaceProvider {
     await directory.removeEntry(name, { recursive: true });
   }
 
+  public async renamePath(oldPath: string, newPath: string): Promise<void> {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    const source = await this.resolveParent(oldPath);
+    const kind = await this.entryKind(source.directory, source.name);
+    const destination = await this.resolveParent(newPath, true);
+    await this.assertEntryMissing(destination.directory, destination.name, newPath);
+    if (kind === "file") {
+      const file = await source.directory.getFileHandle(source.name);
+      const contents = await (await file.getFile()).text();
+      await this.writeFile(newPath, contents);
+    } else {
+      const sourceDirectory = await source.directory.getDirectoryHandle(
+        source.name,
+      );
+      const destinationDirectory = await destination.directory.getDirectoryHandle(
+        destination.name,
+        { create: true },
+      );
+      await this.copyDirectory(sourceDirectory, destinationDirectory);
+    }
+    await source.directory.removeEntry(source.name, { recursive: true });
+  }
+
+  private async entryKind(
+    directory: FileSystemDirectoryHandle,
+    name: string,
+  ): Promise<"file" | "directory"> {
+    try {
+      await directory.getFileHandle(name);
+      return "file";
+    } catch (error) {
+      if ((error as { name?: string })?.name === "NotFoundError")
+        return "directory";
+      throw error;
+    }
+  }
+
+  private async assertEntryMissing(
+    directory: FileSystemDirectoryHandle,
+    name: string,
+    path: string,
+  ): Promise<void> {
+    try {
+      await directory.getFileHandle(name);
+      throw new Error(`'${path}' already exists.`);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("already exists"))
+        throw error;
+    }
+    try {
+      await directory.getDirectoryHandle(name);
+      throw new Error(`'${path}' already exists.`);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("already exists"))
+        throw error;
+    }
+  }
+
+  private async copyDirectory(
+    source: FileSystemDirectoryHandle,
+    destination: FileSystemDirectoryHandle,
+  ): Promise<void> {
+    for await (const [name, child] of source.entries()) {
+      if (child.kind === "directory") {
+        await this.copyDirectory(
+          child as FileSystemDirectoryHandle,
+          await destination.getDirectoryHandle(name, { create: true }),
+        );
+        continue;
+      }
+      const file = await (child as FileSystemFileHandle).getFile();
+      const target = await destination.getFileHandle(name, { create: true });
+      const writable = await target.createWritable();
+      await writable.write(await file.arrayBuffer());
+      await writable.close();
+    }
+  }
+
   private async resolveParent(
     path: string,
     createDirectory = false,

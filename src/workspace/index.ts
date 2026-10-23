@@ -2,7 +2,11 @@ import {
   canUseBrowserWorkspace,
   openBrowserWorkspace,
 } from "./browser";
-import { isTauriRuntime, openDesktopWorkspace } from "./tauri";
+import {
+  isTauriRuntime,
+  openDefaultDesktopWorkspace,
+  openDesktopWorkspace,
+} from "./tauri";
 import type { WorkspaceProvider } from "./types";
 
 export * from "./modules";
@@ -11,6 +15,7 @@ export {
   canUseBrowserWorkspace,
   isTauriRuntime,
   openBrowserWorkspace,
+  openDefaultDesktopWorkspace,
   openDesktopWorkspace,
 };
 

@@ -24,6 +24,8 @@ export interface WorkspaceProvider {
   createFile(path: string): Promise<void>;
   createDirectory(path: string): Promise<void>;
   deletePath(path: string): Promise<void>;
+  /** Moves a file or directory to `newPath` relative to the workspace root. */
+  renamePath(oldPath: string, newPath: string): Promise<void>;
 }
 
 export function workspaceName(path: string): string {

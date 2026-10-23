@@ -74,12 +74,19 @@ export class VisualizationProjector {
     }));
     const objects: VisualObjectNode[] = [];
     const seen = new WeakSet<RuntimeObject>();
-    snapshot.environments.forEach((environment) =>
-      environment.variables.forEach((variable) => {
-        if (!variable.builtin)
-          this.projectObject(variable.name, variable.value, objects, seen);
-      }),
-    );
+    snapshot.environments
+      .filter(
+        (environment) =>
+          environment.active ||
+          environment.kind === "global" ||
+          environment.kind === "module",
+      )
+      .forEach((environment) =>
+        environment.variables.forEach((variable) => {
+          if (!variable.builtin)
+            this.projectObject(variable.name, variable.value, objects, seen);
+        }),
+      );
     const lastEvent = snapshot.events[snapshot.events.length - 1];
     return {
       environments,
@@ -100,6 +107,12 @@ export class VisualizationProjector {
       if (seen.has(value)) return;
       seen.add(value);
       objects.push(this.projectArray(label, value));
+      // Arrays of arrays (matrix rows, weighted graph edge pairs) surface as
+      // their own projected rows so class renderers can draw them individually.
+      value.values.forEach((item, index) => {
+        if (item instanceof ArrayValue)
+          this.projectObject(`${label}.${index}`, item, objects, seen);
+      });
       return;
     }
     if (value instanceof InstanceValue) {
