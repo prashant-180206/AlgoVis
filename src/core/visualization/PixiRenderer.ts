@@ -14,6 +14,9 @@ import type {
 
 const FONT_FAMILY = "DM Mono, IBM Plex Mono, monospace";
 
+const ENVIRONMENT_FILLS = [0x141d16, 0x19241b, 0x1e2b20, 0x233226] as const;
+const ENVIRONMENT_STROKES = [0x7d9168, 0x687c58, 0x56694a, 0x485a40] as const;
+
 const COLORS = {
   card: 0x18241c,
   cardInactive: 0x151b17,
@@ -281,19 +284,36 @@ export class PixiRenderer {
   ): void {
     const environment = layout.node.environment;
     const active = environment.active;
+    const fill =
+      ENVIRONMENT_FILLS[Math.min(depth, ENVIRONMENT_FILLS.length - 1)] ??
+      ENVIRONMENT_FILLS[ENVIRONMENT_FILLS.length - 1];
+    const stroke =
+      ENVIRONMENT_STROKES[Math.min(depth, ENVIRONMENT_STROKES.length - 1)] ??
+      ENVIRONMENT_STROKES[ENVIRONMENT_STROKES.length - 1];
+
+    // Each scope is a block drawn inside its parent's block. The fill gets
+    // slightly lighter with depth and the border stays visible even for
+    // inactive context scopes, so nesting reads without extra chrome.
     const panel = new Graphics();
     panel
       .roundRect(x, y, width, layout.height, 9)
-      .fill(active ? COLORS.card : COLORS.cardInactive)
+      .fill(fill)
       .stroke({
         width: active ? 1.5 : 1,
-        color: active ? COLORS.cardStrokeActive : COLORS.cardStroke,
-        alpha: active ? 1 : 0.55,
+        color: active ? COLORS.cardStrokeActive : stroke,
+        alpha: active ? 1 : 0.6,
       });
     this.content.addChild(panel);
 
+    const rail = new Graphics();
+    rail
+      .roundRect(x + 6, y + 9, 3, Math.max(10, layout.height - 18), 1.5)
+      .fill(active ? COLORS.title : stroke)
+      .alpha = active ? 0.85 : 0.4;
+    this.content.addChild(rail);
+
     const title = `${depth > 0 ? "↳ " : ""}${environment.kind.toUpperCase()} · ${environment.id}`;
-    this.addText(title, x + 12, y + 10, {
+    this.addText(title, x + 16, y + 10, {
       size: 10,
       color: active ? COLORS.title : 0x8a9a8c,
       bold: true,
@@ -313,28 +333,25 @@ export class PixiRenderer {
 
     const separator = new Graphics();
     separator
-      .moveTo(x + 10, y + 28)
-      .lineTo(x + width - 10, y + 28)
-      .stroke({ width: 1, color: COLORS.cardStroke, alpha: 0.35 });
+      .moveTo(x + 12, y + 28)
+      .lineTo(x + width - 12, y + 28)
+      .stroke({ width: 1, color: stroke, alpha: 0.45 });
     this.content.addChild(separator);
 
     const variableStart = y + 36;
     if (layout.variables.length === 0) {
       this.addText(
         active ? "no user bindings" : "scope context",
-        x + 12,
+        x + 16,
         variableStart + 2,
-        { size: 11, color: COLORS.muted },
+        { size: 11, color: active ? COLORS.muted : 0x6a766c },
       );
     } else {
-      const maxCharacters = Math.max(
-        8,
-        Math.floor((width - 24) / 6.2),
-      );
+      const maxCharacters = Math.max(8, Math.floor((width - 28) / 6.2));
       layout.variables.forEach((variable, index) => {
         this.addText(
           this.truncate(`${variable.name} = ${variable.value}`, maxCharacters),
-          x + 12,
+          x + 16,
           variableStart + index * 16,
           {
             size: 11,
@@ -350,21 +367,27 @@ export class PixiRenderer {
 
     if (layout.children.length === 0) return;
 
-    const childX = x + 16;
-    const childWidth = Math.max(220, width - 26);
+    const childX = x + 22;
+    const childWidth = Math.max(200, width - 34);
     const childStart =
-      variableStart + Math.max(1, layout.variables.length) * 16 + 4;
+      variableStart + Math.max(1, layout.variables.length) * 16 + 8;
     const guideHeight =
       layout.children.reduce((total, child) => total + child.height + 8, 0) - 8;
     const guide = new Graphics();
     guide
-      .moveTo(x + 9, y + 30)
-      .lineTo(x + 9, childStart + Math.max(0, guideHeight))
-      .stroke({ width: 1, color: COLORS.cardStroke, alpha: 0.55 });
+      .moveTo(x + 12, y + 32)
+      .lineTo(x + 12, childStart + Math.max(0, guideHeight))
+      .stroke({ width: 1, color: stroke, alpha: 0.65 });
     this.content.addChild(guide);
 
     let childY = childStart;
     layout.children.forEach((child) => {
+      const connector = new Graphics();
+      connector
+        .moveTo(x + 12, childY + 17)
+        .lineTo(childX, childY + 17)
+        .stroke({ width: 1, color: stroke, alpha: 0.65 });
+      this.content.addChild(connector);
       this.drawEnvironmentNode(child, childX, childY, childWidth, depth + 1);
       childY += child.height + 8;
     });

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePanelRef } from "react-resizable-panels";
 import {
   AlertTriangle,
   Boxes,
@@ -36,6 +37,11 @@ import { CodeEditor } from "./components/CodeEditor";
 import { EditorTabs } from "./components/EditorTabs";
 import { FileExplorer } from "./components/FileExplorer";
 import { VisualizationStage } from "./components/VisualizationStage";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "./components/ui/resizable";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import {
@@ -123,7 +129,10 @@ function App() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string>();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [visCollapsed, setVisCollapsed] = useState(false);
   const [bottomOpen, setBottomOpen] = useState(true);
+  const visPanelRef = usePanelRef();
+  const sidebarPanelRef = usePanelRef();
 
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>();
   const [steps, setSteps] = useState<readonly RuntimeSnapshot[]>([]);
@@ -288,6 +297,20 @@ function App() {
     activePath !== undefined &&
     activePath !== VIRTUAL_FILE &&
     dirtyPaths.has(activePath);
+
+  useEffect(() => {
+    const panel = visPanelRef.current;
+    if (!panel) return;
+    if (visCollapsed) panel.collapse();
+    else panel.expand();
+  }, [visCollapsed, visPanelRef]);
+
+  useEffect(() => {
+    const panel = sidebarPanelRef.current;
+    if (!panel) return;
+    if (sidebarOpen) panel.expand();
+    else panel.collapse();
+  }, [sidebarOpen, sidebarPanelRef]);
 
   useEffect(() => {
     const interpreter = parsed.interpreter;
@@ -568,6 +591,144 @@ function App() {
 
   const activeFileName = activePath ? fileName(activePath) : undefined;
 
+  const editorPane = (
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-white/8 px-2 py-1.5">
+        <Button
+          variant="default"
+          size="sm"
+          onClick={togglePlayback}
+          disabled={!parsed.interpreter || loadingModules}
+        >
+          {isPlaying ? (
+            <CirclePause className="h-3.5 w-3.5" />
+          ) : (
+            <CirclePlay className="h-3.5 w-3.5" />
+          )}
+          {isPlaying ? "Pause" : "Play"}
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon"
+          className="h-8 w-8"
+          onClick={stepBackward}
+          disabled={stepCursor <= 0}
+          aria-label="Previous step"
+          title="Previous step (left arrow)"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="secondary"
+          size="icon"
+          className="h-8 w-8"
+          onClick={stepForward}
+          disabled={
+            !parsed.interpreter ||
+            loadingModules ||
+            (status !== InterpreterStatus.Ready && stepCursor >= lastStep)
+          }
+          aria-label="Next step"
+          title="Next line (right arrow)"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={runToEnd}
+          disabled={!parsed.interpreter || loadingModules}
+        >
+          <FastForward className="h-3.5 w-3.5" />
+          Run to end
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={reset}
+          disabled={!parsed.interpreter}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Reset
+        </Button>
+
+        <div className="flex min-w-52 flex-1 items-center gap-2 border-l border-white/8 pl-3">
+          <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-zinc-600">
+            Timeline
+          </span>
+          <input
+            className="min-w-0 flex-1 accent-lime-300"
+            type="range"
+            min="0"
+            max={lastStep}
+            value={stepCursor}
+            onChange={(event) => moveToStep(Number(event.target.value))}
+            disabled={steps.length <= 1}
+            aria-label="Execution timeline"
+          />
+          <span className="shrink-0 font-mono text-[9px] text-zinc-600">
+            {snapshot?.currentLocation
+              ? `L${snapshot.currentLocation.start.line}`
+              : "—"}
+          </span>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2 text-[9px] uppercase tracking-[0.12em] text-zinc-600">
+          <Gauge className="hidden h-3.5 w-3.5 sm:block" />
+          <input
+            className="w-16 accent-lime-300"
+            type="range"
+            min="1"
+            max="5"
+            value={speed}
+            onChange={(event) => setSpeed(Number(event.target.value))}
+            aria-label="Execution speed"
+          />
+          <span className="font-mono text-zinc-500">{speedMs} ms</span>
+          <span className="font-mono text-zinc-500">
+            {steps.length === 0 ? 0 : stepCursor} / {lastStep}
+          </span>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1">
+        {activePath ? (
+          <CodeEditor
+            source={source}
+            fileName={activeFileName}
+            filePath={
+              workspace && activePath !== VIRTUAL_FILE ? activePath : undefined
+            }
+            error={error}
+            currentLocation={snapshot?.currentLocation}
+            onChange={updateSource}
+          />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-4 bg-[#111411] px-6 text-center">
+            <FileCode2 className="h-8 w-8 text-zinc-700" />
+            <div>
+              <p className="text-sm font-medium text-zinc-300">No file open</p>
+              <p className="mt-1 text-xs leading-5 text-zinc-600">
+                Choose a file in the explorer or open a folder to start editing.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => void openFolder()}>
+                <FolderOpen className="h-3.5 w-3.5" />
+                Open folder
+              </Button>
+              {!workspace ? (
+                <Button variant="ghost" size="sm" onClick={restoreStarter}>
+                  Restore starter file
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#0d100e] text-zinc-100 selection:bg-lime-300/30">
       <header className="flex h-11 shrink-0 items-center gap-3 border-b border-white/8 bg-[#0e110e] px-3">
@@ -671,6 +832,19 @@ function App() {
             size="icon"
             className={cn(
               "h-8 w-8",
+              !visCollapsed && "bg-lime-300/10 text-lime-300",
+            )}
+            onClick={() => setVisCollapsed((value) => !value)}
+            aria-label="Toggle visualization"
+            title={visCollapsed ? "Show visualization" : "Hide visualization"}
+          >
+            <Boxes className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-8 w-8",
               bottomOpen && "bg-lime-300/10 text-lime-300",
             )}
             onClick={() => setBottomOpen((value) => !value)}
@@ -681,21 +855,30 @@ function App() {
           </Button>
         </nav>
 
-        {sidebarOpen ? (
-          <FileExplorer
-            tree={workspaceTree}
-            workspaceName={workspace?.name}
-            activePath={activePath}
-            dirtyPaths={dirtyPaths}
-            loading={workspaceLoading}
-            onOpenFile={(path) => void openWorkspaceFile(path)}
-            onRefresh={() => void refreshWorkspace()}
-            onCreateFile={createWorkspaceFile}
-            onOpenFolder={() => void openFolder()}
-          />
-        ) : null}
-
-        <section className="flex min-w-0 flex-1 flex-col">
+        <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+          <ResizablePanel
+            panelRef={sidebarPanelRef}
+            defaultSize="20%"
+            minSize="180px"
+            maxSize="520px"
+            collapsible
+            collapsedSize="0px"
+          >
+            <FileExplorer
+              tree={workspaceTree}
+              workspaceName={workspace?.name}
+              activePath={activePath}
+              dirtyPaths={dirtyPaths}
+              loading={workspaceLoading}
+              onOpenFile={(path) => void openWorkspaceFile(path)}
+              onRefresh={() => void refreshWorkspace()}
+              onCreateFile={createWorkspaceFile}
+              onOpenFolder={() => void openFolder()}
+            />
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="80%" minSize="30%">
+            <section className="flex h-full min-h-0 min-w-0 flex-col">
           <EditorTabs
             paths={openPaths}
             activePath={activePath}
@@ -726,173 +909,48 @@ function App() {
             </div>
           ) : null}
 
-          <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-white/8 px-2 py-1.5">
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={togglePlayback}
-                  disabled={!parsed.interpreter || loadingModules}
+          <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+            <ResizablePanel defaultSize="70%" minSize="30%">
+              <ResizablePanelGroup orientation="horizontal" className="h-full">
+                <ResizablePanel defaultSize="60%" minSize="25%">
+                  {editorPane}
+                </ResizablePanel>
+                <ResizableHandle withHandle />
+                <ResizablePanel
+                  panelRef={visPanelRef}
+                  defaultSize="40%"
+                  minSize="15%"
+                  maxSize="75%"
+                  collapsible
+                  collapsedSize="0%"
                 >
-                  {isPlaying ? (
-                    <CirclePause className="h-3.5 w-3.5" />
-                  ) : (
-                    <CirclePlay className="h-3.5 w-3.5" />
-                  )}
-                  {isPlaying ? "Pause" : "Play"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={stepBackward}
-                  disabled={stepCursor <= 0}
-                  aria-label="Previous step"
-                  title="Previous step (left arrow)"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={stepForward}
-                  disabled={
-                    !parsed.interpreter ||
-                    loadingModules ||
-                    (status !== InterpreterStatus.Ready &&
-                      stepCursor >= lastStep)
-                  }
-                  aria-label="Next step"
-                  title="Next line (right arrow)"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={runToEnd}
-                  disabled={!parsed.interpreter || loadingModules}
-                >
-                  <FastForward className="h-3.5 w-3.5" />
-                  Run to end
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={reset}
-                  disabled={!parsed.interpreter}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Reset
-                </Button>
-
-                <div className="flex min-w-52 flex-1 items-center gap-2 border-l border-white/8 pl-3">
-                  <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-zinc-600">
-                    Timeline
-                  </span>
-                  <input
-                    className="min-w-0 flex-1 accent-lime-300"
-                    type="range"
-                    min="0"
-                    max={lastStep}
-                    value={stepCursor}
-                    onChange={(event) => moveToStep(Number(event.target.value))}
-                    disabled={steps.length <= 1}
-                    aria-label="Execution timeline"
+                  <VisualizationStage
+                    visualization={visualization}
+                    stepIndex={stepCursor}
+                    stepCount={steps.length}
                   />
-                  <span className="shrink-0 font-mono text-[9px] text-zinc-600">
-                    {snapshot?.currentLocation
-                      ? `L${snapshot.currentLocation.start.line}`
-                      : "—"}
-                  </span>
-                </div>
-
-                <div className="flex shrink-0 items-center gap-2 text-[9px] uppercase tracking-[0.12em] text-zinc-600">
-                  <Gauge className="hidden h-3.5 w-3.5 sm:block" />
-                  <input
-                    className="w-16 accent-lime-300"
-                    type="range"
-                    min="1"
-                    max="5"
-                    value={speed}
-                    onChange={(event) => setSpeed(Number(event.target.value))}
-                    aria-label="Execution speed"
-                  />
-                  <span className="font-mono text-zinc-500">{speedMs} ms</span>
-                  <span className="font-mono text-zinc-500">
-                    {steps.length === 0 ? 0 : stepCursor} / {lastStep}
-                  </span>
-                </div>
-              </div>
-
-              <div className="min-h-0 flex-1">
-                {activePath ? (
-                  <CodeEditor
-                    source={source}
-                    fileName={activeFileName}
-                    filePath={
-                      workspace && activePath !== VIRTUAL_FILE
-                        ? activePath
-                        : undefined
-                    }
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </ResizablePanel>
+            {bottomOpen ? (
+              <>
+                <ResizableHandle withHandle />
+                <ResizablePanel defaultSize="30%" minSize="12%" maxSize="60%">
+                  <BottomPanel
+                    snapshot={snapshot}
+                    previousSnapshot={previousSnapshot}
                     error={error}
-                    currentLocation={snapshot?.currentLocation}
-                    onChange={updateSource}
+                    status={playbackStatus}
+                    stepIndex={stepCursor}
+                    stepCount={steps.length}
                   />
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center gap-4 bg-[#111411] px-6 text-center">
-                    <FileCode2 className="h-8 w-8 text-zinc-700" />
-                    <div>
-                      <p className="text-sm font-medium text-zinc-300">
-                        No file open
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-zinc-600">
-                        Choose a file in the explorer or open a folder to start
-                        editing.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" onClick={() => void openFolder()}>
-                        <FolderOpen className="h-3.5 w-3.5" />
-                        Open folder
-                      </Button>
-                      {!workspace ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={restoreStarter}
-                        >
-                          Restore starter file
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="min-h-72 shrink-0 border-t border-white/8 xl:min-h-0 xl:w-[42%] xl:border-l xl:border-t-0">
-              <VisualizationStage
-                visualization={visualization}
-                stepIndex={stepCursor}
-                stepCount={steps.length}
-              />
-            </div>
-          </div>
-
-          {bottomOpen ? (
-            <BottomPanel
-              snapshot={snapshot}
-              previousSnapshot={previousSnapshot}
-              error={error}
-              status={playbackStatus}
-              stepIndex={stepCursor}
-              stepCount={steps.length}
-            />
-          ) : null}
-        </section>
+                </ResizablePanel>
+              </>
+            ) : null}
+            </ResizablePanelGroup>
+            </section>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
 
       <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-white/8 bg-[#0c0f0c] px-3 text-[9px] uppercase tracking-[0.12em] text-zinc-600">

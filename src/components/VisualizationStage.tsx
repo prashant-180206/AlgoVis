@@ -105,11 +105,6 @@ export function VisualizationStage({
       <div
         ref={hostRef}
         className="relative min-h-0 flex-1 cursor-grab overflow-hidden bg-[#121612] active:cursor-grabbing"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(216,242,122,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(216,242,122,.035) 1px, transparent 1px)",
-          backgroundSize: "28px 28px",
-        }}
       >
         {!ready ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-[0.18em] text-zinc-600">
@@ -133,8 +128,11 @@ export function VisualizationStage({
       <div className="flex shrink-0 items-center justify-between border-t border-white/8 px-4 py-2 text-[10px] uppercase tracking-[0.12em] text-zinc-600">
         <span>Environment projection</span>
         <span className="font-mono text-zinc-500">
-          STEP {stepCount === 0 ? 0 : stepIndex} / {Math.max(0, stepCount - 1)}
-          {visualization.activeOperation ? ` · ${visualization.activeOperation}` : ""}
+          STEP {stepCount === 0 ? 0 : stepIndex} /{" "}
+          {Math.max(0, stepCount - 1)}
+          {visualization.activeOperation
+            ? ` · ${visualization.activeOperation}`
+            : ""}
         </span>
       </div>
     </Card>

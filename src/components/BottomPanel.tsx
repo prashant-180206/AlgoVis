@@ -35,7 +35,7 @@ export function BottomPanel({
   ];
 
   return (
-    <section className="flex h-72 shrink-0 flex-col border-t border-white/8 bg-[#0e110e]">
+    <section className="flex h-full min-h-0 flex-col border-t border-white/8 bg-[#0e110e]">
       <div className="flex h-8 shrink-0 items-stretch border-b border-white/8">
         <div className="flex items-stretch">
           {tabs.map((item) => {

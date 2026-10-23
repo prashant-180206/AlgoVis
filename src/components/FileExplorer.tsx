@@ -156,7 +156,7 @@ export function FileExplorer({
   }
 
   return (
-    <aside className="flex h-full w-60 shrink-0 flex-col border-r border-white/8 bg-[#101310]">
+    <aside className="flex h-full w-full min-w-0 flex-col border-r border-white/8 bg-[#101310]">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-white/8 px-3">
         <span className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
           Explorer
