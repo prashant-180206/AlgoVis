@@ -10,6 +10,8 @@ type MonacoInstance = Parameters<OnMount>[1];
 
 interface CodeEditorProps {
   source: string;
+  fileName?: string;
+  filePath?: string;
   error?: string;
   currentLocation?: SourceLocation;
   onChange: (value: string) => void;
@@ -17,6 +19,8 @@ interface CodeEditorProps {
 
 export function CodeEditor({
   source,
+  fileName = "Algorithm.js",
+  filePath,
   error,
   currentLocation,
   onChange,
@@ -71,12 +75,12 @@ export function CodeEditor({
   }, [currentLocation, source]);
 
   return (
-    <Card className="flex min-h-122.5 flex-col lg:min-h-0">
+    <Card className="flex h-full min-h-0 flex-col" title={filePath}>
       <CardHeader className="shrink-0">
-        <div className="flex items-center gap-2">
-          <FileCode2 className="h-4 w-4 text-lime-300" />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300">
-            Algorithm.js
+        <div className="flex min-w-0 items-center gap-2">
+          <FileCode2 className="h-4 w-4 shrink-0 text-lime-300" />
+          <span className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300">
+            {fileName}
           </span>
           <Badge className="border-lime-300/20 text-lime-300">JS-LIKE</Badge>
         </div>

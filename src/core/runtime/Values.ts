@@ -1,5 +1,5 @@
 import { SourceLocation } from "../language/SourceLocation";
-import type { TypeReference } from "../language/Ast";
+import type { BindingPattern, TypeReference } from "../language/Ast";
 
 export type RuntimePrimitive = number | string | boolean | null | undefined;
 export type RuntimeValue =
@@ -143,7 +143,7 @@ export class FunctionValue extends RuntimeObject {
   public readonly kind = "function" as const;
   public readonly runtimeType = "Function";
   public readonly name: string;
-  public readonly parameters: readonly string[];
+  public readonly parameters: readonly (string | BindingPattern)[];
   public readonly declarationLocation: SourceLocation;
   public readonly call: (...argumentsList: RuntimeValue[]) => RuntimeValue;
   public readonly receiverCall?: (
@@ -152,7 +152,7 @@ export class FunctionValue extends RuntimeObject {
   ) => RuntimeValue;
   public constructor(
     name: string,
-    parameters: readonly string[],
+    parameters: readonly (string | BindingPattern)[],
     declarationLocation: SourceLocation,
     call: (...argumentsList: RuntimeValue[]) => RuntimeValue,
     receiverCall?: (

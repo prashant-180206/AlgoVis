@@ -70,7 +70,7 @@ export function VisualizationStage({
   }
 
   return (
-    <Card className="flex min-h-122.5 flex-col lg:min-h-0">
+    <Card className="flex h-full min-h-0 flex-col">
       <CardHeader className="shrink-0">
         <div className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-lime-300" />

@@ -1,16 +1,20 @@
 import {
+  ArrayBindingPattern,
   ArrayExpression,
   AssignmentStatement,
   BinaryExpression,
+  BindingPattern,
   BlockStatement,
   BreakStatement,
   CallExpression,
+  ClassDeclaration,
   ContinueStatement,
   Expression,
   ExpressionStatement,
   ForStatement,
   FunctionDeclaration,
   IdentifierExpression,
+  IdentifierPattern,
   IfStatement,
   ImportDeclaration,
   ImportSpecifier,
@@ -18,7 +22,9 @@ import {
   LiteralExpression,
   MemberExpression,
   NewExpression,
+  ObjectBindingPattern,
   ObjectExpression,
+  ObjectPatternProperty,
   Program,
   ReturnStatement,
   Statement,
@@ -26,7 +32,6 @@ import {
   UnaryExpression,
   VariableDeclarationStatement,
   WhileStatement,
-  ClassDeclaration,
 } from "./Ast";
 import { SourceLocation } from "./SourceLocation";
 import { Token, TokenType } from "./Token";
@@ -194,22 +199,105 @@ export class Parser {
     return new ExpressionStatement(expression.location, expression);
   }
 
+  private bindingPattern(): BindingPattern {
+    this.skipNewlines();
+    if (this.match(TokenType.Identifier)) {
+      const identifier = this.previous();
+      return new IdentifierPattern(identifier.location, identifier.lexeme);
+    }
+    if (this.match(TokenType.LeftBrace)) {
+      return this.objectBindingPattern(this.previous());
+    }
+    if (this.match(TokenType.LeftBracket)) {
+      return this.arrayBindingPattern(this.previous());
+    }
+    throw new ParserError(
+      "Expected a binding name or destructuring pattern.",
+      this.peek().location,
+    );
+  }
+  private objectBindingPattern(start: Token): ObjectBindingPattern {
+    const properties: ObjectPatternProperty[] = [];
+    this.skipNewlines();
+    while (!this.check(TokenType.RightBrace)) {
+      const key = this.advance();
+      if (
+        key.type !== TokenType.Identifier &&
+        key.type !== TokenType.String &&
+        key.type !== TokenType.Number
+      )
+        throw new ParserError(
+          "Expected a property name in the object pattern.",
+          key.location,
+        );
+      const keyName = key.lexeme.replace(/^['"]|['"]$/g, "");
+      let value: BindingPattern;
+      if (this.match(TokenType.Colon)) {
+        value = this.bindingPattern();
+      } else {
+        if (key.type !== TokenType.Identifier)
+          throw new ParserError(
+            "Object shorthand bindings must use identifiers.",
+            key.location,
+          );
+        value = new IdentifierPattern(key.location, key.lexeme);
+      }
+      properties.push(
+        new ObjectPatternProperty(
+          this.join(key.location, value.location),
+          keyName,
+          value,
+        ),
+      );
+      this.skipNewlines();
+      if (!this.match(TokenType.Comma)) break;
+      this.skipNewlines();
+    }
+    const end = this.consume(
+      TokenType.RightBrace,
+      "Expected '}' after object pattern.",
+    );
+    return new ObjectBindingPattern(
+      this.join(start.location, end.location),
+      properties,
+    );
+  }
+  private arrayBindingPattern(start: Token): ArrayBindingPattern {
+    const elements: (BindingPattern | undefined)[] = [];
+    this.skipNewlines();
+    while (!this.check(TokenType.RightBracket)) {
+      if (this.match(TokenType.Comma)) {
+        elements.push(undefined);
+        this.skipNewlines();
+        continue;
+      }
+      elements.push(this.bindingPattern());
+      this.skipNewlines();
+      if (!this.match(TokenType.Comma)) break;
+      this.skipNewlines();
+    }
+    const end = this.consume(
+      TokenType.RightBracket,
+      "Expected ']' after array pattern.",
+    );
+    return new ArrayBindingPattern(
+      this.join(start.location, end.location),
+      elements,
+    );
+  }
   private variableDeclaration(
     keyword: Token,
     consumeSemicolon = true,
   ): Statement {
-    const name = this.consume(
-      TokenType.Identifier,
-      "Expected a variable name.",
-    );
+    const pattern = this.bindingPattern();
     const initializer = this.match(TokenType.Equal)
       ? this.expression()
       : undefined;
     if (consumeSemicolon) this.consumeOptionalSemicolon();
     return new VariableDeclarationStatement(
-      this.join(keyword.location, initializer?.location ?? name.location),
+      this.join(keyword.location, initializer?.location ?? pattern.location),
       keyword.lexeme as "let" | "const" | "var",
-      name.lexeme,
+      pattern,
       initializer,
     );
   }
@@ -219,12 +307,13 @@ export class Parser {
       "Expected a function name.",
     );
     this.consume(TokenType.LeftParen, "Expected '(' after function name.");
-    const parameters: string[] = [];
+    const parameters: BindingPattern[] = [];
+    this.skipNewlines();
     while (!this.check(TokenType.RightParen)) {
-      parameters.push(
-        this.consume(TokenType.Identifier, "Expected a parameter name.").lexeme,
-      );
+      parameters.push(this.bindingPattern());
+      this.skipNewlines();
       if (!this.match(TokenType.Comma)) break;
+      this.skipNewlines();
     }
     this.consume(TokenType.RightParen, "Expected ')' after parameters.");
     this.consume(TokenType.LeftBrace, "Expected '{' before function body.");
@@ -247,13 +336,13 @@ export class Parser {
         `Expected a method name in class body, received '${this.peek().lexeme}' (${this.peek().type}).`,
       );
       this.consume(TokenType.LeftParen, "Expected '(' after method name.");
-      const parameters: string[] = [];
+      const parameters: BindingPattern[] = [];
+      this.skipNewlines();
       while (!this.check(TokenType.RightParen)) {
-        parameters.push(
-          this.consume(TokenType.Identifier, "Expected a parameter name.")
-            .lexeme,
-        );
+        parameters.push(this.bindingPattern());
+        this.skipNewlines();
         if (!this.match(TokenType.Comma)) break;
+        this.skipNewlines();
       }
       this.consume(
         TokenType.RightParen,
@@ -518,9 +607,12 @@ export class Parser {
   }
   private arrayLiteral(start: Token): Expression {
     const elements: Expression[] = [];
+    this.skipNewlines();
     while (!this.check(TokenType.RightBracket)) {
       elements.push(this.expression());
+      this.skipNewlines();
       if (!this.match(TokenType.Comma)) break;
+      this.skipNewlines();
     }
     const end = this.consume(
       TokenType.RightBracket,
@@ -533,6 +625,7 @@ export class Parser {
   }
   private objectLiteral(start: Token): Expression {
     const properties: { key: string; value: Expression }[] = [];
+    this.skipNewlines();
     while (!this.check(TokenType.RightBrace)) {
       const key = this.advance();
       if (
@@ -544,12 +637,24 @@ export class Parser {
           "Expected an object property name.",
           key.location,
         );
-      this.consume(TokenType.Colon, "Expected ':' after property name.");
+      let value: Expression;
+      if (this.match(TokenType.Colon)) {
+        value = this.expression();
+      } else {
+        if (key.type !== TokenType.Identifier)
+          throw new ParserError(
+            "Object shorthand properties must use identifiers.",
+            key.location,
+          );
+        value = new IdentifierExpression(key.location, key.lexeme);
+      }
       properties.push({
         key: key.lexeme.replace(/^['"]|['"]$/g, ""),
-        value: this.expression(),
+        value,
       });
+      this.skipNewlines();
       if (!this.match(TokenType.Comma)) break;
+      this.skipNewlines();
     }
     const end = this.consume(
       TokenType.RightBrace,

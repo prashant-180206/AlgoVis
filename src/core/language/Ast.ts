@@ -28,6 +28,52 @@ export class Program extends AstNode {
     super(location);
   }
 }
+export abstract class BindingPattern extends AstNode {}
+export class IdentifierPattern extends BindingPattern {
+  public constructor(
+    location: SourceLocation,
+    public readonly name: string,
+  ) {
+    super(location);
+  }
+}
+export class ObjectPatternProperty extends AstNode {
+  public constructor(
+    location: SourceLocation,
+    public readonly key: string,
+    public readonly value: BindingPattern,
+  ) {
+    super(location);
+  }
+}
+export class ObjectBindingPattern extends BindingPattern {
+  public constructor(
+    location: SourceLocation,
+    public readonly properties: readonly ObjectPatternProperty[],
+  ) {
+    super(location);
+  }
+}
+export class ArrayBindingPattern extends BindingPattern {
+  public constructor(
+    location: SourceLocation,
+    public readonly elements: readonly (BindingPattern | undefined)[],
+  ) {
+    super(location);
+  }
+}
+export function bindingNames(pattern: BindingPattern): string[] {
+  if (pattern instanceof IdentifierPattern) return [pattern.name];
+  if (pattern instanceof ObjectBindingPattern)
+    return pattern.properties.flatMap((property) =>
+      bindingNames(property.value),
+    );
+  if (pattern instanceof ArrayBindingPattern)
+    return pattern.elements.flatMap((element) =>
+      element ? bindingNames(element) : [],
+    );
+  return [];
+}
 export interface ImportSpecifier {
   readonly imported: string;
   readonly local: string;
@@ -162,7 +208,7 @@ export class VariableDeclarationStatement extends Statement {
   public constructor(
     location: SourceLocation,
     public readonly kind: "let" | "const" | "var",
-    public readonly name: string,
+    public readonly pattern: BindingPattern,
     public readonly initializer?: Expression,
   ) {
     super(location);
@@ -210,7 +256,7 @@ export class FunctionDeclaration extends Statement {
   public constructor(
     location: SourceLocation,
     public readonly name: string,
-    public readonly parameters: readonly string[],
+    public readonly parameters: readonly BindingPattern[],
     public readonly body: BlockStatement,
   ) {
     super(location);

@@ -1,8 +1,10 @@
 import { ExecutionEvent, ExecutionEventType } from "../execution/ExecutionEvent";
 import {
+  ArrayBindingPattern,
   ArrayExpression,
   AssignmentStatement,
   BinaryExpression,
+  BindingPattern,
   BlockStatement,
   BreakStatement,
   CallExpression,
@@ -13,12 +15,14 @@ import {
   ForStatement,
   FunctionDeclaration,
   IdentifierExpression,
+  IdentifierPattern,
   IfStatement,
   ImportDeclaration,
   IndexExpression,
   LiteralExpression,
   MemberExpression,
   NewExpression,
+  ObjectBindingPattern,
   ObjectExpression,
   Program,
   ReturnStatement,
@@ -197,8 +201,10 @@ export class Interpreter {
       const value = statement.initializer
         ? this.evaluate(statement.initializer, scope)
         : new PrimitiveValue(undefined);
-      scope.define(statement.name, value);
-      this.writeEvent(statement, statement.name, value);
+      const bindings = this.bindPattern(statement.pattern, value, scope);
+      bindings.forEach(({ name, value: boundValue }) =>
+        this.writeEvent(statement, name, boundValue),
+      );
       return;
     }
     if (statement instanceof AssignmentStatement) {
@@ -378,6 +384,55 @@ export class Interpreter {
     this.runtime.emit(event);
   }
 
+  private bindPattern(
+    pattern: BindingPattern,
+    value: RuntimeValue,
+    scope: Scope,
+  ): { name: string; value: RuntimeValue }[] {
+    if (pattern instanceof IdentifierPattern) {
+      scope.define(pattern.name, value);
+      return [{ name: pattern.name, value }];
+    }
+    if (pattern instanceof ObjectBindingPattern) {
+      return pattern.properties.flatMap((property) =>
+        this.bindPattern(
+          property.value,
+          this.destructuredProperty(value, property.key),
+          scope,
+        ),
+      );
+    }
+    if (pattern instanceof ArrayBindingPattern) {
+      return pattern.elements.flatMap((element, index) =>
+        element
+          ? this.bindPattern(
+              element,
+              this.destructuredProperty(value, String(index)),
+              scope,
+            )
+          : [],
+      );
+    }
+    throw new Error("Unsupported binding pattern.");
+  }
+  private destructuredProperty(
+    value: RuntimeValue,
+    name: string,
+  ): RuntimeValue {
+    if (value instanceof ObjectValue)
+      return value.properties.get(name) ?? new PrimitiveValue(undefined);
+    if (value instanceof ArrayValue) {
+      if (name === "length") return new PrimitiveValue(value.length);
+      if (/^\d+$/.test(name)) {
+        const index = Number(name);
+        return index < value.length
+          ? value.read(index)
+          : new PrimitiveValue(undefined);
+      }
+      return new PrimitiveValue(undefined);
+    }
+    throw new Error(`Cannot destructure ${value.runtimeType} value.`);
+  }
   private invoke(
     declaration: FunctionDeclaration,
     closure: Scope,
@@ -387,7 +442,11 @@ export class Interpreter {
     const locals = this.createScope(closure);
     if (receiver) locals.define("this", receiver);
     declaration.parameters.forEach((parameter, index) =>
-      locals.define(parameter, args[index] ?? new PrimitiveValue(undefined)),
+      this.bindPattern(
+        parameter,
+        args[index] ?? new PrimitiveValue(undefined),
+        locals,
+      ),
     );
     this.runtime.enterFrame({
       functionName: declaration.name,

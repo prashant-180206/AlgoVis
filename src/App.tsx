@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   Boxes,
   ChevronLeft,
   ChevronRight,
@@ -7,11 +8,15 @@ import {
   CirclePlay,
   FastForward,
   FileCode2,
+  Files,
+  FolderOpen,
   Gauge,
   RefreshCw,
   RotateCcw,
-  Settings2,
+  Save,
   Sparkles,
+  Terminal,
+  X,
 } from "lucide-react";
 import {
   ExecutionEventType,
@@ -26,13 +31,25 @@ import {
   type Program,
   type RuntimeSnapshot,
 } from "./core";
+import { BottomPanel } from "./components/BottomPanel";
 import { CodeEditor } from "./components/CodeEditor";
-import { ExecutionFeed } from "./components/ExecutionFeed";
-import { RuntimeInspector } from "./components/RuntimeInspector";
+import { EditorTabs } from "./components/EditorTabs";
+import { FileExplorer } from "./components/FileExplorer";
 import { VisualizationStage } from "./components/VisualizationStage";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
+import {
+  moduleDisplayName,
+  openWorkspaceFromMachine,
+  workspaceModuleId,
+  workspaceModulePath,
+  type WorkspaceNode,
+  type WorkspaceProvider,
+} from "./workspace";
+import { cn } from "./lib/utils";
 import "./App.css";
+
+const VIRTUAL_FILE = "Algorithm.js";
 
 const starterSource = `import { Stack } from "./modules/structures.js";
 
@@ -64,20 +81,50 @@ function importsOf(program: Program): ImportDeclaration[] {
   );
 }
 
-function moduleName(id: string): string {
-  try {
-    return new URL(id).pathname.split("/").pop() || id;
-  } catch {
-    return id;
-  }
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function fileName(path: string): string {
+  const segments = path.split("/");
+  return segments[segments.length - 1] || path;
+}
+
+function collectFiles(node: WorkspaceNode): WorkspaceNode[] {
+  if (node.kind === "file") return [node];
+  return (node.children ?? []).flatMap(collectFiles);
+}
+
+function findEntryFile(tree: WorkspaceNode): WorkspaceNode | undefined {
+  const files = collectFiles(tree);
+  const preferredNames = ["main.js", "index.js", "algorithm.js", "app.js"];
+  for (const name of preferredNames) {
+    const match = files.find((file) => file.name.toLowerCase() === name);
+    if (match) return match;
+  }
+  return (
+    files.find((file) => /\.(js|mjs|cjs|ts|tsx|jsx)$/.test(file.name)) ??
+    files[0]
+  );
+}
+
 function App() {
-  const [source, setSource] = useState(starterSource);
+  const [openFiles, setOpenFiles] = useState<ReadonlyMap<string, string>>(
+    () => new Map([[VIRTUAL_FILE, starterSource]]),
+  );
+  const [activePath, setActivePath] = useState<string | undefined>(VIRTUAL_FILE);
+  const [dirtyPaths, setDirtyPaths] = useState<ReadonlySet<string>>(new Set());
+  const [workspace, setWorkspace] = useState<WorkspaceProvider>();
+  const [workspaceTree, setWorkspaceTree] = useState<WorkspaceNode>();
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string>();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [bottomOpen, setBottomOpen] = useState(true);
+
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>();
   const [steps, setSteps] = useState<readonly RuntimeSnapshot[]>([]);
   const [stepCursor, setStepCursor] = useState(0);
@@ -94,6 +141,13 @@ function App() {
     () => new URL(".", window.location.href).href,
     [],
   );
+
+  const source = activePath ? (openFiles.get(activePath) ?? "") : "";
+  const entryModuleId = useMemo(() => {
+    if (workspace && activePath && activePath !== VIRTUAL_FILE)
+      return workspaceModuleId(activePath);
+    return new URL(activePath ?? VIRTUAL_FILE, moduleBaseUrl).href;
+  }, [activePath, moduleBaseUrl, workspace]);
   const modules = useMemo(() => {
     const registry = new ModuleRegistry(moduleBaseUrl);
     moduleSources.forEach((moduleSource, id) =>
@@ -124,8 +178,7 @@ function App() {
     () => (parsed.program ? importsOf(parsed.program) : []),
     [parsed.program],
   );
-  const visibleModuleError =
-    imports.length > 0 ? moduleError : undefined;
+  const visibleModuleError = imports.length > 0 ? moduleError : undefined;
 
   useEffect(() => {
     const program = parsed.program;
@@ -136,7 +189,7 @@ function App() {
       for (const statement of importsOf(candidate)) {
         let id: string;
         try {
-          id = new URL(statement.source, parentId ?? moduleBaseUrl).href;
+          id = new URL(statement.source, parentId ?? entryModuleId).href;
         } catch {
           setModuleError(`Invalid module path '${statement.source}'.`);
           continue;
@@ -152,7 +205,7 @@ function App() {
         scan(parseProgram(moduleSource), id);
       } catch (error) {
         setModuleError(
-          `Failed to parse module '${moduleName(id)}': ${errorMessage(error)}`,
+          `Failed to parse module '${moduleDisplayName(id)}': ${errorMessage(error)}`,
         );
       }
     }
@@ -163,27 +216,42 @@ function App() {
     }
 
     setLoadingModules(true);
+    let cancelled = false;
     void (async () => {
       const next = new Map(moduleSources);
       for (const id of missing) {
         attemptedModules.current.add(id);
         try {
-          const response = await fetch(id);
-          if (!response.ok)
-            throw new Error(`HTTP ${response.status} ${response.statusText}`);
-          const moduleSource = await response.text();
+          const workspacePath = workspaceModulePath(id);
+          let moduleSource: string;
+          if (workspacePath !== undefined) {
+            if (!workspace)
+              throw new Error("No workspace folder is open for this import.");
+            moduleSource = await workspace.readFile(workspacePath);
+          } else {
+            const response = await fetch(id);
+            if (!response.ok)
+              throw new Error(`HTTP ${response.status} ${response.statusText}`);
+            moduleSource = await response.text();
+          }
           parseProgram(moduleSource);
           next.set(id, moduleSource);
         } catch (error) {
-          setModuleError(
-            `Failed to load module '${moduleName(id)}': ${errorMessage(error)}`,
-          );
+          if (!cancelled)
+            setModuleError(
+              `Failed to load module '${moduleDisplayName(id)}': ${errorMessage(error)}`,
+            );
         }
       }
-      if (next.size !== moduleSources.size) setModuleSources(next);
-      setLoadingModules(false);
+      if (!cancelled && next.size !== moduleSources.size)
+        setModuleSources(next);
+      if (!cancelled) setLoadingModules(false);
     })();
-  }, [parsed.program, moduleSources, moduleBaseUrl, moduleReload]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [parsed.program, moduleSources, entryModuleId, workspace, moduleReload]);
 
   const visualization = useMemo(
     () =>
@@ -214,6 +282,12 @@ function App() {
           : "PAUSED";
   const previousSnapshot =
     stepCursor > 0 ? steps[stepCursor - 1] : undefined;
+  const openPaths = [...openFiles.keys()];
+  const canSave =
+    workspace !== undefined &&
+    activePath !== undefined &&
+    activePath !== VIRTUAL_FILE &&
+    dirtyPaths.has(activePath);
 
   useEffect(() => {
     const interpreter = parsed.interpreter;
@@ -324,8 +398,157 @@ function App() {
     setModuleReload((value) => value + 1);
   }
 
+  function clearModuleCache(): void {
+    attemptedModules.current = new Set();
+    setModuleSources(new Map());
+    setModuleError(undefined);
+    setModuleReload((value) => value + 1);
+  }
+
+  async function openFolder(): Promise<void> {
+    setWorkspaceLoading(true);
+    setWorkspaceError(undefined);
+    try {
+      const provider = await openWorkspaceFromMachine();
+      if (!provider) return;
+      const tree = await provider.readTree();
+      setWorkspace(provider);
+      setWorkspaceTree(tree);
+      setOpenFiles(new Map());
+      setDirtyPaths(new Set());
+      setActivePath(undefined);
+      setIsPlaying(false);
+      setSteps([]);
+      setStepCursor(0);
+      setSnapshot(undefined);
+      clearModuleCache();
+
+      const entry = findEntryFile(tree);
+      if (entry) {
+        const contents = await provider.readFile(entry.path);
+        setOpenFiles(new Map([[entry.path, contents]]));
+        setActivePath(entry.path);
+      }
+    } catch (error) {
+      if (!isAbortError(error))
+        setWorkspaceError(`Unable to open folder: ${errorMessage(error)}`);
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }
+
+  async function refreshWorkspace(): Promise<void> {
+    if (!workspace) return;
+    setWorkspaceLoading(true);
+    try {
+      setWorkspaceTree(await workspace.readTree());
+      setWorkspaceError(undefined);
+      clearModuleCache();
+    } catch (error) {
+      setWorkspaceError(`Unable to refresh files: ${errorMessage(error)}`);
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }
+
+  async function openWorkspaceFile(path: string): Promise<void> {
+    if (!workspace) return;
+    if (openFiles.has(path)) {
+      setActivePath(path);
+      return;
+    }
+    try {
+      const contents = await workspace.readFile(path);
+      setOpenFiles((current) => new Map(current).set(path, contents));
+      setActivePath(path);
+      setWorkspaceError(undefined);
+    } catch (error) {
+      setWorkspaceError(`Unable to open '${path}': ${errorMessage(error)}`);
+    }
+  }
+
+  async function createWorkspaceFile(path: string): Promise<void> {
+    if (!workspace) return;
+    try {
+      await workspace.createFile(path);
+      setWorkspaceTree(await workspace.readTree());
+      await openWorkspaceFile(path);
+      setWorkspaceError(undefined);
+    } catch (error) {
+      setWorkspaceError(`Unable to create '${path}': ${errorMessage(error)}`);
+    }
+  }
+
+  async function saveActiveFile(): Promise<void> {
+    if (!workspace || !activePath || activePath === VIRTUAL_FILE) return;
+    const contents = openFiles.get(activePath);
+    if (contents === undefined) return;
+    try {
+      await workspace.writeFile(activePath, contents);
+      setDirtyPaths((current) => {
+        const next = new Set(current);
+        next.delete(activePath);
+        return next;
+      });
+      const moduleId = workspaceModuleId(activePath);
+      attemptedModules.current.delete(moduleId);
+      setModuleSources((current) => {
+        if (!current.has(moduleId)) return current;
+        const next = new Map(current);
+        next.delete(moduleId);
+        return next;
+      });
+      setModuleReload((value) => value + 1);
+      setWorkspaceError(undefined);
+    } catch (error) {
+      setWorkspaceError(`Unable to save '${activePath}': ${errorMessage(error)}`);
+    }
+  }
+
+  function updateSource(value: string): void {
+    if (!activePath) return;
+    setIsPlaying(false);
+    setModuleError(undefined);
+    setOpenFiles((current) => new Map(current).set(activePath, value));
+    if (workspace && activePath !== VIRTUAL_FILE)
+      setDirtyPaths((current) => new Set(current).add(activePath));
+  }
+
+  function closeFile(path: string): void {
+    if (
+      dirtyPaths.has(path) &&
+      !window.confirm(`Discard unsaved changes in ${fileName(path)}?`)
+    )
+      return;
+    const remaining = [...openFiles.keys()].filter((key) => key !== path);
+    setOpenFiles((current) => {
+      const next = new Map(current);
+      next.delete(path);
+      return next;
+    });
+    setDirtyPaths((current) => {
+      const next = new Set(current);
+      next.delete(path);
+      return next;
+    });
+    if (activePath === path) setActivePath(remaining[remaining.length - 1]);
+  }
+
+  function restoreStarter(): void {
+    setOpenFiles((current) =>
+      new Map(current).set(VIRTUAL_FILE, starterSource),
+    );
+    setActivePath(VIRTUAL_FILE);
+    setDirtyPaths(new Set());
+  }
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void saveActiveFile();
+        return;
+      }
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, .monaco-editor")) return;
       if (event.key === "ArrowRight") {
@@ -343,37 +566,47 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
+  const activeFileName = activePath ? fileName(activePath) : undefined;
+
   return (
-    <main className="min-h-screen bg-[#0d100e] text-zinc-100 selection:bg-lime-300/30">
-      <header className="mx-auto flex max-w-370 items-center justify-between px-5 py-5 lg:px-8">
-        <div className="flex items-center gap-3">
-          <div className="grid h-9 w-9 place-items-center rounded-md bg-lime-300 text-xs font-black text-[#10140f] shadow-[0_0_24px_rgba(216,242,122,.18)]">
+    <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#0d100e] text-zinc-100 selection:bg-lime-300/30">
+      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-white/8 bg-[#0e110e] px-3">
+        <div className="flex shrink-0 items-center gap-2.5">
+          <div className="grid h-7 w-7 place-items-center rounded bg-lime-300 text-[10px] font-black text-[#10140f] shadow-[0_0_20px_rgba(216,242,122,.15)]">
             AV
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <strong className="text-sm font-semibold tracking-tight">AlgoVis</strong>
-              <Badge className="border-lime-300/20 text-lime-300">LAB 01</Badge>
-            </div>
-            <span className="text-[10px] uppercase tracking-[0.16em] text-zinc-600">
-              Algorithm language laboratory
-            </span>
+          <div className="flex items-baseline gap-2">
+            <strong className="text-xs font-semibold tracking-tight">AlgoVis</strong>
+            <Badge className="hidden border-lime-300/20 text-lime-300 sm:inline-flex">
+              IDE
+            </Badge>
           </div>
         </div>
-        <div className="hidden items-center gap-5 text-[10px] uppercase tracking-[0.14em] text-zinc-600 sm:flex">
-          <span className="flex items-center gap-2">
-            <i className="h-1.5 w-1.5 rounded-full bg-lime-300 shadow-[0_0_10px_#d8f27a]" />
+
+        <div className="hidden min-w-0 items-center gap-2 border-l border-white/8 pl-3 md:flex">
+          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
+          <span
+            className="truncate font-mono text-[10px] text-zinc-500"
+            title={workspace?.root}
+          >
+            {workspace?.root ?? "No folder opened"}
+          </span>
+        </div>
+
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <span className="hidden items-center gap-2 px-2 text-[9px] uppercase tracking-[0.14em] text-zinc-600 sm:flex">
+            <i
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                parsed.error
+                  ? "bg-red-300"
+                  : isPlaying
+                    ? "bg-lime-300 shadow-[0_0_8px_#d8f27a]"
+                    : "bg-zinc-600",
+              )}
+            />
             {playbackStatus}
           </span>
-          <span>{parsed.tokens.length} tokens</span>
-          {imports.length > 0 ? (
-            <span className="flex items-center gap-2">
-              <FileCode2 className="h-3.5 w-3.5" />
-              {loadingModules
-                ? "loading modules"
-                : `${moduleSources.size} module${moduleSources.size === 1 ? "" : "s"}`}
-            </span>
-          ) : null}
           {imports.length > 0 ? (
             <Button
               variant="ghost"
@@ -388,130 +621,307 @@ function App() {
               />
             </Button>
           ) : null}
-          <Button variant="ghost" size="icon" aria-label="Settings" title="Settings">
-            <Settings2 className="h-4 w-4" />
+          <Button
+            size="sm"
+            onClick={() => void openFolder()}
+            disabled={workspaceLoading}
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            Open folder
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void saveActiveFile()}
+            disabled={!canSave}
+            title="Save file (Ctrl+S)"
+          >
+            <Save className="h-3.5 w-3.5" />
+            Save
           </Button>
         </div>
       </header>
-      <div className="mx-auto max-w-370 px-5 pb-10 lg:px-8">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-y border-white/8 py-3">
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="default"
-              onClick={togglePlayback}
-              disabled={!parsed.interpreter || loadingModules}
-            >
-              {isPlaying ? <CirclePause className="h-4 w-4" /> : <CirclePlay className="h-4 w-4" />}
-              {isPlaying ? "Pause" : "Play"}
-            </Button>
-            <Button
-              variant="secondary"
-              size="icon"
-              onClick={stepBackward}
-              disabled={stepCursor <= 0}
-              aria-label="Previous step"
-              title="Previous step (left arrow)"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="secondary"
-              size="icon"
-              onClick={stepForward}
-              disabled={
-                !parsed.interpreter ||
-                loadingModules ||
-                (status !== InterpreterStatus.Ready && stepCursor >= lastStep)
-              }
-              aria-label="Next step"
-              title="Next line (right arrow)"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={runToEnd}
-              disabled={!parsed.interpreter || loadingModules}
-            >
-              <FastForward className="h-3.5 w-3.5" />
-              Run to end
-            </Button>
-            <Button variant="ghost" onClick={reset} disabled={!parsed.interpreter}>
-              <RotateCcw className="h-3.5 w-3.5" />
-              Reset
-            </Button>
-          </div>
-          <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.12em] text-zinc-600">
-            <span className="hidden items-center gap-1.5 sm:flex">
-              <Gauge className="h-3.5 w-3.5" /> Speed
-            </span>
-            <input
-              className="w-20 accent-lime-300"
-              type="range"
-              min="1"
-              max="5"
-              value={speed}
-              onChange={(event) => setSpeed(Number(event.target.value))}
-              aria-label="Execution speed"
-            />
-            <span className="font-mono text-zinc-500">{speedMs} ms</span>
-            <span className="font-mono text-zinc-400">
-              STEP {steps.length === 0 ? 0 : stepCursor} / {lastStep}
-            </span>
-          </div>
-        </div>
-        <div className="mb-3 flex items-center gap-3 rounded-md border border-white/8 bg-[#121612] px-3 py-2">
-          <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-zinc-600">
-            Timeline
-          </span>
-          <input
-            className="min-w-0 flex-1 accent-lime-300"
-            type="range"
-            min="0"
-            max={lastStep}
-            value={stepCursor}
-            onChange={(event) => moveToStep(Number(event.target.value))}
-            disabled={steps.length <= 1}
-            aria-label="Execution timeline"
+
+      <div className="flex min-h-0 flex-1">
+        <nav className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-white/8 bg-[#0c0f0c] py-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-8 w-8",
+              sidebarOpen && "bg-lime-300/10 text-lime-300",
+            )}
+            onClick={() => setSidebarOpen((value) => !value)}
+            aria-label="Toggle file explorer"
+            title="File explorer"
+          >
+            <Files className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => void openFolder()}
+            aria-label="Open folder"
+            title="Open folder"
+          >
+            <FolderOpen className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-8 w-8",
+              bottomOpen && "bg-lime-300/10 text-lime-300",
+            )}
+            onClick={() => setBottomOpen((value) => !value)}
+            aria-label="Toggle bottom panel"
+            title="Runtime, output, and problems"
+          >
+            <Terminal className="h-4 w-4" />
+          </Button>
+        </nav>
+
+        {sidebarOpen ? (
+          <FileExplorer
+            tree={workspaceTree}
+            workspaceName={workspace?.name}
+            activePath={activePath}
+            dirtyPaths={dirtyPaths}
+            loading={workspaceLoading}
+            onOpenFile={(path) => void openWorkspaceFile(path)}
+            onRefresh={() => void refreshWorkspace()}
+            onCreateFile={createWorkspaceFile}
+            onOpenFolder={() => void openFolder()}
           />
-          <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-            {snapshot?.currentLocation
-              ? `line ${snapshot.currentLocation.start.line}`
-              : "not started"}
-            {" · "}
-            {selectedEvent?.type ?? "READY"}
-          </span>
-        </div>
-        <div className="mb-4 grid gap-4 lg:grid-cols-[minmax(400px,.9fr)_minmax(0,1.35fr)] lg:min-h-140">
-          <CodeEditor
-            source={source}
-            error={error}
-            currentLocation={snapshot?.currentLocation}
-            onChange={(value) => {
+        ) : null}
+
+        <section className="flex min-w-0 flex-1 flex-col">
+          <EditorTabs
+            paths={openPaths}
+            activePath={activePath}
+            dirtyPaths={dirtyPaths}
+            canSave={canSave}
+            onSelect={(path) => {
               setIsPlaying(false);
-              setModuleError(undefined);
-              setSource(value);
+              setActivePath(path);
             }}
+            onClose={closeFile}
+            onSave={() => void saveActiveFile()}
           />
-          <VisualizationStage
-            visualization={visualization}
-            stepIndex={stepCursor}
-            stepCount={steps.length}
-          />
-        </div>
-        <RuntimeInspector snapshot={snapshot} previousSnapshot={previousSnapshot} />
-        <div className="mt-4">
-          <ExecutionFeed snapshot={snapshot} />
-        </div>
-        <footer className="mt-7 flex items-center justify-between border-t border-white/8 pt-4 text-[10px] uppercase tracking-[0.12em] text-zinc-700">
-          <span className="flex items-center gap-1.5">
-            <Sparkles className="h-3 w-3" /> Built for understanding execution
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Boxes className="h-3 w-3" /> {parsed.tokens.length} tokens · AlgoVis v0.1
-          </span>
-        </footer>
+
+          {workspaceError ? (
+            <div className="flex shrink-0 items-center gap-2 border-b border-red-400/20 bg-red-400/[0.05] px-3 py-1.5 text-[11px] text-red-300">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate" title={workspaceError}>
+                {workspaceError}
+              </span>
+              <button
+                className="rounded p-0.5 text-red-300/60 hover:bg-white/10 hover:text-red-200"
+                onClick={() => setWorkspaceError(undefined)}
+                type="button"
+                aria-label="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : null}
+
+          <div className="flex min-h-0 flex-1 flex-col xl:flex-row">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-white/8 px-2 py-1.5">
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={togglePlayback}
+                  disabled={!parsed.interpreter || loadingModules}
+                >
+                  {isPlaying ? (
+                    <CirclePause className="h-3.5 w-3.5" />
+                  ) : (
+                    <CirclePlay className="h-3.5 w-3.5" />
+                  )}
+                  {isPlaying ? "Pause" : "Play"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={stepBackward}
+                  disabled={stepCursor <= 0}
+                  aria-label="Previous step"
+                  title="Previous step (left arrow)"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={stepForward}
+                  disabled={
+                    !parsed.interpreter ||
+                    loadingModules ||
+                    (status !== InterpreterStatus.Ready &&
+                      stepCursor >= lastStep)
+                  }
+                  aria-label="Next step"
+                  title="Next line (right arrow)"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={runToEnd}
+                  disabled={!parsed.interpreter || loadingModules}
+                >
+                  <FastForward className="h-3.5 w-3.5" />
+                  Run to end
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={reset}
+                  disabled={!parsed.interpreter}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Reset
+                </Button>
+
+                <div className="flex min-w-52 flex-1 items-center gap-2 border-l border-white/8 pl-3">
+                  <span className="shrink-0 text-[9px] uppercase tracking-[0.12em] text-zinc-600">
+                    Timeline
+                  </span>
+                  <input
+                    className="min-w-0 flex-1 accent-lime-300"
+                    type="range"
+                    min="0"
+                    max={lastStep}
+                    value={stepCursor}
+                    onChange={(event) => moveToStep(Number(event.target.value))}
+                    disabled={steps.length <= 1}
+                    aria-label="Execution timeline"
+                  />
+                  <span className="shrink-0 font-mono text-[9px] text-zinc-600">
+                    {snapshot?.currentLocation
+                      ? `L${snapshot.currentLocation.start.line}`
+                      : "—"}
+                  </span>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-2 text-[9px] uppercase tracking-[0.12em] text-zinc-600">
+                  <Gauge className="hidden h-3.5 w-3.5 sm:block" />
+                  <input
+                    className="w-16 accent-lime-300"
+                    type="range"
+                    min="1"
+                    max="5"
+                    value={speed}
+                    onChange={(event) => setSpeed(Number(event.target.value))}
+                    aria-label="Execution speed"
+                  />
+                  <span className="font-mono text-zinc-500">{speedMs} ms</span>
+                  <span className="font-mono text-zinc-500">
+                    {steps.length === 0 ? 0 : stepCursor} / {lastStep}
+                  </span>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1">
+                {activePath ? (
+                  <CodeEditor
+                    source={source}
+                    fileName={activeFileName}
+                    filePath={
+                      workspace && activePath !== VIRTUAL_FILE
+                        ? activePath
+                        : undefined
+                    }
+                    error={error}
+                    currentLocation={snapshot?.currentLocation}
+                    onChange={updateSource}
+                  />
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center gap-4 bg-[#111411] px-6 text-center">
+                    <FileCode2 className="h-8 w-8 text-zinc-700" />
+                    <div>
+                      <p className="text-sm font-medium text-zinc-300">
+                        No file open
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-zinc-600">
+                        Choose a file in the explorer or open a folder to start
+                        editing.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" onClick={() => void openFolder()}>
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        Open folder
+                      </Button>
+                      {!workspace ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={restoreStarter}
+                        >
+                          Restore starter file
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="min-h-72 shrink-0 border-t border-white/8 xl:min-h-0 xl:w-[42%] xl:border-l xl:border-t-0">
+              <VisualizationStage
+                visualization={visualization}
+                stepIndex={stepCursor}
+                stepCount={steps.length}
+              />
+            </div>
+          </div>
+
+          {bottomOpen ? (
+            <BottomPanel
+              snapshot={snapshot}
+              previousSnapshot={previousSnapshot}
+              error={error}
+              status={playbackStatus}
+              stepIndex={stepCursor}
+              stepCount={steps.length}
+            />
+          ) : null}
+        </section>
       </div>
+
+      <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-white/8 bg-[#0c0f0c] px-3 text-[9px] uppercase tracking-[0.12em] text-zinc-600">
+        <span className="flex items-center gap-1.5 text-lime-300/70">
+          <Sparkles className="h-3 w-3" />
+          {playbackStatus}
+        </span>
+        <span className="hidden items-center gap-1.5 sm:flex">
+          <FileCode2 className="h-3 w-3" />
+          {activePath ?? "no file"}
+        </span>
+        <span className="ml-auto flex items-center gap-3">
+          <span>{parsed.tokens.length} tokens</span>
+          {imports.length > 0 ? (
+            <span>
+              {loadingModules
+                ? "loading modules"
+                : `${moduleSources.size} module${moduleSources.size === 1 ? "" : "s"}`}
+            </span>
+          ) : null}
+          <span>
+            {steps.length === 0 ? 0 : stepCursor} / {lastStep} steps
+          </span>
+          <span className="hidden items-center gap-1.5 md:flex">
+            <Boxes className="h-3 w-3" />
+            {workspace?.kind ?? "preview"} · AlgoVis v0.1
+          </span>
+        </span>
+      </footer>
     </main>
   );
 }
